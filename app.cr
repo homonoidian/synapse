@@ -261,10 +261,14 @@ end
 abstract struct EvalResult; end
 
 record OkResult < EvalResult
-record ErrResult < EvalResult, error : Lua::LuaError | ArgumentError, signature : {String, Int32}, rule : Rule, offset : Int32
+record ErrResult < EvalResult, error : Lua::LuaError | ArgumentError, rule : Rule do
+  def index
+    rule.index
+  end
+end
 
-class ResponseContext
-  def initialize(@rule : Rule, @receiver : Cell, @message : Message, @attack = 0.0)
+class KeywordResponseContext
+  def initialize(@rule : KeywordRule, @receiver : Cell, @message : Message, @attack = 0.0)
     @strength = 120.0
   end
 
@@ -464,102 +468,130 @@ class ResponseContext
   end
 end
 
-class Rule
-  class RuleMirror
-    include LuaCallable
-
-    def initialize(@rule : Rule)
-    end
-
-    def keyword
-      @rule.@keyword
-    end
-
-    def params
-      @rule.@params
-    end
-
-    def code
-      @rule.@lua
-    end
+abstract class Rule
+  def initialize(@lua : Excerpt)
   end
 
-  def initialize(@keyword : String, @params : Array(String), @lua : String, @offset : Int32)
-    @mirror = RuleMirror.new(self)
+  def index
+    @lua.start
+  end
+end
+
+class BirthRule < Rule
+  def result(receiver : Cell, message : Message)
   end
 
-  def unify(other : Rule)
-    return self if self == other
-    return other unless @keyword == other.@keyword
+  def signature(*, to signatures)
+  end
 
-    @params = other.@params
-    @lua = other.@lua
-    @offset = other.@offset
+  def update(for cell : Cell, newer : BirthRule)
+    return self if same?(newer)
+    return self if @lua == newer.@lua
+
+    tmp = @lua
+
+    @lua = newer.@lua
+
+    # may happen if meaningless characters were added
+    unless tmp.string == @lua.string
+      answer(cell)
+    end
 
     self
   end
 
-  def unify(store)
-    prev = store[{@keyword, @params.size}]?
-
-    store[{@keyword, @params.size}] = prev ? prev.unify(self) : self
+  def answer(receiver : Cell)
+    # on-birth must be rerun for every copy separately!
+    receiver.each_relative do |cell|
+      cell.interpret result(cell)
+    end
   end
 
-  def prn(receiver)
-    ->(state : LibLua::State) {
-      stack = Lua::Stack.new(state, :all)
-      receiver.prn(stack.pop.to_s)
-      return 1
-    }
+  def result(receiver : Cell) : EvalResult
+    stack = Lua::Stack.new
+    stack.set_global("self", receiver.memory)
+
+    begin
+      stack.run(@lua.string, "birth")
+
+      OkResult.new
+    rescue e : Lua::LuaError
+      ErrResult.new(e, self)
+    rescue e : ArgumentError
+      ErrResult.new(e, self)
+    ensure
+      stack.close
+    end
+  end
+end
+
+class KeywordRule < Rule
+  def initialize(@keyword : Excerpt, @params : Array(Excerpt), lua : Excerpt)
+    super(lua)
+
+    @id = UUID.random
+  end
+
+  def header_start
+    @keyword.start
+  end
+
+  def header_end
+    @params.last?.try &.end || @keyword.end
+  end
+
+  def index
+    @keyword.start
+  end
+
+  def signature(*, to signatures)
+    signatures << signature
+  end
+
+  def signature
+    {@keyword.string, @params.size}
   end
 
   def result(receiver : Cell, message : Message, attack = 0.0) : EvalResult
-    response = ResponseContext.new(self, receiver, message, attack)
+    response = KeywordResponseContext.new(self, receiver, message, attack)
 
     stack = Lua::Stack.new
     response.fill(stack)
 
-    # stack.set_global("prn", prn(receiver))
-
-    # # receiver() -- return my id
-    # # sender() -- return sender id
-    # # swim() -- set velocity
-    # # emit(keyword) -- emit without args
-    # # send(keyword, args) -- emit with default strength
-
-    # stack.set_global("swim", swim(receiver))
-    # stack.set_global("self", response)
-    # stack.set_global("mirror", @mirror)
     stack.set_global("self", receiver.memory)
     @params.zip(message.args) do |param, arg|
-      stack.set_global(param, arg)
+      stack.set_global(param.string, arg)
     end
 
     begin
-      stack.run(@lua, @keyword)
-      OkResult.new
+      stack.run(@lua.string, @keyword.string)
+      result = OkResult.new
     rescue e : Lua::LuaError
-      ErrResult.new(e, {@keyword, @params.size}, self, @offset)
+      result = ErrResult.new(e, self)
     rescue e : ArgumentError
-      ErrResult.new(e, {@keyword, @params.size}, self, @offset)
+      result = ErrResult.new(e, self)
     ensure
       stack.close
     end
   end
 
-  def ans(receiver : Cell, vesicle : Vesicle, attack : Float64) : EvalResult
-    result(receiver, vesicle.message, attack)
+  def update(for cell : Cell, newer : KeywordRule)
+    return self if self == newer
+    return newer unless @keyword == newer.@keyword
+
+    @params = newer.@params
+    @lua = newer.@lua
+    @id = UUID.random
+
+    self
   end
 
-  RUN_ALLOW = {"heartbeat"}
-
-  def run(receiver : Cell, message : Message)
-    raise "BUG: denied 'run!' to '#{@keyword}'" unless RUN_ALLOW.includes?(@keyword)
-
-    result(receiver, message)
+  def answer(receiver : Cell, vesicle : Vesicle, attack : Float64)
+    result = result(receiver, vesicle.message, attack)
+    receiver.interpret(result)
   end
 
-  def_equals_and_hash @keyword, @params, @lua, @offset
+  def_equals_and_hash @id
 end
 
 class Protocol
@@ -567,15 +599,26 @@ class Protocol
 
   def initialize
     @id = UUID.random
-    @rules = {} of {String, Int32} => Rule
+    @rules = {} of {String, Int32} => KeywordRule
+    @birth = BirthRule.new(Excerpt.new("", 0))
   end
 
-  def clear
-    @rules.clear
+  def each_keyword_rule
+    @rules.each_value do |kwrule|
+      yield kwrule
+    end
   end
 
-  def unify(other : Rule)
-    other.unify(@rules)
+  def update(for cell : Cell, newer : KeywordRule)
+    if prev = @rules[newer.signature]?
+      @rules[newer.signature] = prev.update(cell, newer)
+    else
+      @rules[newer.signature] = newer
+    end
+  end
+
+  def update(for cell : Cell, newer : BirthRule)
+    @birth = @birth.update(cell, newer)
   end
 
   def fetch_rule?(keyword : String, nargs : Int32)
@@ -587,14 +630,18 @@ class Protocol
     @rules = @rules.reject { |key, _| !key.in?(signatures) }
   end
 
-  def ans(receiver : Cell, vesicle : Vesicle) : EvalResult
-    return OkResult.new unless rule = fetch_rule?(vesicle.keyword, vesicle.nargs)
+  def answer(receiver : Cell, vesicle : Vesicle)
+    return unless rule = fetch_rule?(vesicle.keyword, vesicle.nargs)
 
     # Attack is a heading pointing hdg the vesicle.
     delta = (vesicle.mid - receiver.mid)
     attack = Math.atan2(-delta.y, delta.x)
 
-    rule.ans(receiver, vesicle, attack)
+    rule.answer(receiver, vesicle, attack)
+  end
+
+  def born(receiver : Cell)
+    @birth.answer(receiver)
   end
 
   # Fetches the heartbeat message declaration. Returns nil if
@@ -606,54 +653,189 @@ end
 
 class ProtocolEditorModel
   getter id : UUID
-  property store : Protocol
+  property protocol : Protocol
   property cursor : Int32
   property buffer : TextBuffer
-  property markers : Hash(Int32, ProtocolEditor::Marker)
+  property markers : Hash(Int32, Marker)
   property? sync : Bool
 
-  def initialize(@store, @cursor = 0, @buffer = TextBuffer.new, @markers = {} of Int32 => ProtocolEditor::Marker, @sync = true)
+  def initialize(@protocol, @cursor = 0, @buffer = TextBuffer.new, @markers = {} of Int32 => Marker, @sync = true)
     @id = UUID.random
+  end
+end
+
+# An excerpt with a beginning and an end. Keeps positional
+# information in sync with the excerpt string.
+#
+# Note that in the excerpt range, the end point is excluded.
+# That is, the excerpt range is [b; e)
+record Excerpt, string : String, start : Int32 do
+  # Returns the end index of this excerpt in the source string.
+  def end : Int
+    start + string.size
+  end
+
+  # Maps *index* in this excerpt to the corresponding index in
+  # the source string.
+  def map(index : Int) : Int
+    start + index
+  end
+
+  # Removes whitespace from the left and right of this excerpt.
+  # Adjusts positional information accordingly.
+  def strip : Excerpt
+    orig = string
+
+    lstr = orig.lstrip
+    rstr = lstr.rstrip
+
+    Excerpt.new(
+      string: rstr,
+      start: start + (orig.size - lstr.size),
+    )
+  end
+
+  # Concatenates this and *other* excerpts.
+  #
+  # *other* excerpt must start immediately after this excerpt.
+  # That is, its beginning must be the same as this excerpt's
+  # end. Otherwise, this method will raise.
+  def +(other : Excerpt)
+    unless other.start == self.end
+      raise ArgumentError.new("'+': right bounded excerpt must follow the left bounded excerpt")
+    end
+
+    Excerpt.new(string + other.string, start)
+  end
+end
+
+# Represents the result of parsing a block. It's optionally
+# a rule, plus zero or more markers.
+record ParseResult, rule : Rule? = nil, markers = [] of Marker do
+  # A shorthand for an error result with no rule and a single
+  # hint marker.
+  def self.hint(offset : Int, message : String)
+    new(markers: [Marker.hint(offset, message)])
+  end
+
+  # A shorthand for a success result with `KeywordRule` rule
+  # and no markers.
+  def self.keyword(keyword : Excerpt, params : Array(Excerpt), lua : Excerpt)
+    new(rule: KeywordRule.new(keyword, params, lua))
+  end
+end
+
+# Blocks are intermediates between raw source and `Rule`s.
+abstract struct Block
+  # Tries to convert this block into the corresponding `Rule`.
+  abstract def to_rule : ParseResult
+end
+
+# Birth blocks are implicit blocks that consist of code only,
+# and are later converted into `BirthRule`s.
+#
+# ```synapse
+# -- The following Lua code will be stored under the born
+# -- block/born rule.
+# x = 123
+# y = 456
+# z = "hello world"
+#
+# heartbeat |
+#   -- And this is going to be stored under a rule block /
+#   -- keyword rule (heartbeat)
+#   x = x + 1
+# ```
+record BirthBlock < Block, code : Excerpt do
+  def to_rule : ParseResult
+    ParseResult.new rule: BirthRule.new(code)
+  end
+end
+
+record RuleBlock < Block, header : Excerpt, code : Excerpt do
+  def to_rule : ParseResult
+    scanner = StringScanner.new(header.string)
+
+    #
+    # Parse message keyword.
+    #
+    # <messageKeyword> ::= <alpha> <alnum>*
+    #
+    start = header.map(scanner.offset)
+    unless keyword = scanner.scan(/(?:[A-Za-z]\w*)/)
+      return ParseResult.hint(start, "I want keyword (aka message name) here!")
+    end
+
+    keyword = Excerpt.new(keyword, start)
+
+    #
+    # Parse message parameters. Parameters follow the keyword,
+    # therefore, a leading whitespace is always expected.
+    #
+    # <params> ::= (WS <param>)*
+    # <param> ::= <alpha> <alnum>*
+    #
+    start = header.map(scanner.offset)
+    params = [] of Excerpt
+    while param = scanner.scan(/[ \t]+(?:[A-Za-z]\w*)/)
+      params << Excerpt.new(param, start).strip
+      start = header.map(scanner.offset)
+    end
+
+    #
+    # Make sure that the pipe character itself is in the
+    # right place.
+    #
+    unless scanner.scan(/[ \t]+\|/)
+      return ParseResult.hint(header.map(scanner.offset), "I want space followed by pipe '|' here!")
+    end
+
+    ParseResult.keyword(keyword, params, code)
+  end
+end
+
+record Marker, color : SF::Color, offset : Int32, tally : Hash(String, Int32) do
+  def initialize(color, offset, message : String)
+    hash = Hash(String, Int32).new(0)
+
+    initialize(color, offset, message.lines.tally_by(hash, &.itself))
+  end
+
+  def self.hint(offset, message)
+    hint_color = SF::Color.new(0xFF, 0xCA, 0x28)
+    new(hint_color, offset, message)
+  end
+
+  def message
+    String.build do |io|
+      tally.each do |line, count|
+        io << line
+        unless count == 1
+          io << "(x" << count << ")"
+        end
+      end
+    end
+  end
+
+  def stack(other : Marker)
+    tally.merge!(other.tally) do |_, l, r|
+      l + r
+    end
+
+    self
   end
 end
 
 class ProtocolEditor
   include SF::Drawable
 
-  record Marker, color : SF::Color, offset : Int32, tally : Hash(String, Int32) do
-    def initialize(color, offset, message : String)
-      hash = Hash(String, Int32).new(0)
-
-      initialize(color, offset, message.lines.tally_by(hash, &.itself))
-    end
-
-    def message
-      String.build do |io|
-        tally.each do |line, count|
-          io << line
-          unless count == 1
-            io << "(x" << count << ")"
-          end
-        end
-      end
-    end
-
-    def stack(other : Marker)
-      tally.merge!(other.tally) do |_, l, r|
-        l + r
-      end
-
-      self
-    end
-  end
-
   getter model
 
   def initialize(@cell : Cell, @model : ProtocolEditorModel)
   end
 
-  def initialize(cell : Cell, store : Protocol)
-    initialize(cell, ProtocolEditorModel.new(store))
+  def initialize(cell : Cell, protocol : Protocol)
+    initialize(cell, ProtocolEditorModel.new(protocol))
   end
 
   def initialize(cell : Cell, other : ProtocolEditor)
@@ -686,7 +868,7 @@ class ProtocolEditor
 
   private delegate :cursor, :cursor=, to: @model
   private delegate :buffer, :buffer=, to: @model
-  private delegate :store, :store=, to: @model
+  private delegate :protocol, :protocol=, to: @model
   private delegate :markers, :markers=, to: @model
   private delegate :sync?, :sync=, to: @model
 
@@ -694,7 +876,8 @@ class ProtocolEditor
     # Signal that what's currently running is out of sync from
     # what's being shown.
     self.sync = false
-    mark(SF::Color::Red, err.offset, err.error.message || "lua error")
+
+    mark(SF::Color::Red, err.index, err.error.message || "lua error")
   end
 
   def handle(event : SF::Event::KeyPressed)
@@ -795,82 +978,137 @@ class ProtocolEditor
   def handle(event)
   end
 
-  def parse
-    error = nil
-    source = self.source.strip
+  def parse(source : String)
+    stack = [BirthBlock.new(Excerpt.new("", 0))] of Block
+    offset = 0
+    results = [] of ParseResult
 
-    signatures = Set({String, Int32}).new
-
-    hint_color = SF::Color.new(0xFF, 0xCA, 0x28)
-
-    if source.empty?
-      self.sync = true
-      store.sync(signatures)
-      return
+    source.each_line(chomp: false) do |line|
+      excerpt = Excerpt.new(line, offset)
+      offset += line.size
+      content = excerpt.strip
+      if content.string.ends_with?('|')
+        results << stack.pop.to_rule
+        stack << RuleBlock.new(content, Excerpt.new("", excerpt.end))
+        next
+      end
+      top = stack.last
+      stack[-1] = top.copy_with(code: top.code + excerpt)
     end
 
-    # Here's the syntax we're (roughly) aiming for.
-    #
-    #   <top> ::= <Rule>*
-    #   <Rule> ::= <messageName> (WS <messageParam>)* WS "|" <messageBody>
-    #   <messageBody> ::= <indent> [lua code] <dedent>
-    #   <messageName> ::= [A-Za-z]\w*
-    #   <messageParam> ::= [A-Za-z]\w*
-    s = StringScanner.new(source)
-
-    until s.eos?
-      offset = s.offset
-
-      unless name = s.scan(/(?:[A-Za-z]\w*)/)
-        error = ProtocolEditor::Marker.new(hint_color, s.offset, "I want message name here!")
-        break
-      end
-
-      params = [] of String
-      while param = s.scan(/\s+(?:[A-Za-z]\w*)/)
-        params << param.strip
-      end
-
-      unless s.scan(/\s+\|/)
-        error = ProtocolEditor::Marker.new(hint_color, s.offset, "I want space followed by pipe '|' here!")
-        break
-      end
-
-      lua = ""
-
-      unless s.check(/\r?\n\s+|$/)
-        error = ProtocolEditor::Marker.new(hint_color, s.offset, "I want this line to end! You should indent here, and then type some Lua.")
-        break
-      end
-
-      # Rest is presumably a bunch of Lua lines like so:
-      #
-      #   <NL> <INDENT SPACES> line of lua ...
-      #   <NL> <INDENT SPACES> line of lua ...
-      #   ...
-      #
-      # While lines have even one leading whitespace, we should
-      # consider them part of the Lua code. Therefore, let's
-      # scan until there is a line *without* leading whitespace.
-      lua = s.scan_until(/\r?\n(?=[^ \t])|$/) || lua
-
-      signatures << {name, params.size}
-
-      # Now we have all it takes to create a message rule.
-      # Create it and unify with the existing decls.
-      store.unify Rule.new(name, params, lua, offset)
+    stack.each do |block|
+      results << block.to_rule
     end
 
-    unless error
-      self.sync = true
-      store.sync(signatures)
-      return
-    end
-
-    mark(error)
-
-    self.sync = false
+    results
   end
+
+  def parse
+    results = parse(source)
+    signatures = Set({String, Int32}).new
+    if results.empty?
+      self.sync = true
+      protocol.sync(signatures)
+      return
+    end
+
+    error = false
+
+    results.each do |result|
+      if rule = result.rule
+        rule.signature(to: signatures)
+
+        protocol.update(for: @cell, newer: rule)
+      else
+        error = true
+        result.markers.each do |marker|
+          mark(marker)
+        end
+      end
+    end
+
+    self.sync = !error
+    unless error
+      protocol.sync(signatures)
+    end
+  end
+
+  # def parse
+  #   error = nil
+  #   source = self.source.strip
+
+  #   signatures = Set({String, Int32}).new
+
+  #   hint_color = SF::Color.new(0xFF, 0xCA, 0x28)
+
+  #   if source.empty?
+  #     self.sync = true
+  #     protocol.sync(signatures)
+  #     return
+  #   end
+
+  #   # Here's the syntax we're (roughly) aiming for.
+  #   #
+  #   #   <top> ::= <Rule>*
+  #   #   <Rule> ::= <messageName> (WS <messageParam>)* WS "|" <messageBody>
+  #   #   <messageBody> ::= <indent> [lua code] <dedent>
+  #   #   <messageName> ::= [A-Za-z]\w*
+  #   #   <messageParam> ::= [A-Za-z]\w*
+  #   s = StringScanner.new(source)
+
+  #   until s.eos?
+  #     offset = s.offset
+
+  #     unless name = s.scan(/(?:[A-Za-z]\w*)/)
+  #       error = Marker.new(hint_color, s.offset, "I want message name here!")
+  #       break
+  #     end
+
+  #     params = [] of String
+  #     while param = s.scan(/\s+(?:[A-Za-z]\w*)/)
+  #       params << param.strip
+  #     end
+
+  #     unless s.scan(/\s+\|/)
+  #       error = Marker.new(hint_color, s.offset, "I want space followed by pipe '|' here!")
+  #       break
+  #     end
+
+  #     lua = ""
+
+  #     unless s.check(/\r?\n\s+|$/)
+  #       error = Marker.new(hint_color, s.offset, "I want this line to end! You should indent here, and then type some Lua.")
+  #       break
+  #     end
+
+  #     # Rest is presumably a bunch of Lua lines like so:
+  #     #
+  #     #   <NL> <INDENT SPACES> line of lua ...
+  #     #   <NL> <INDENT SPACES> line of lua ...
+  #     #   ...
+  #     #
+  #     # While lines have even one leading whitespace, we should
+  #     # consider them part of the Lua code. Therefore, let's
+  #     # scan until there is a line *without* leading whitespace.
+  #     lua = s.scan_until(/\r?\n(?=[^ \t])|$/) || lua
+
+  #     signatures << {name, params.size}
+
+  #     # Now we have all it takes to create a message rule.
+  #     # Create it and update with the existing decls.
+  #     protocol.update Rule.new(name, params, lua, offset)
+  #   end
+
+  #   unless error
+  #     self.sync = true
+  #     protocol.sync(signatures)
+  #     return
+  #   end
+
+  #   mark(error)
+
+  #   self.sync = false
+  # end
 
   def draw(target, states)
     origin = @cell.mid + @cell.class.radius * 1.1
@@ -928,6 +1166,29 @@ class ProtocolEditor
     text.position = (origin + 15.at(15)).sfi
 
     #
+    # Underline every keyword rule. Keyword index and parameter
+    # indices are assumed to be on the same line.
+    #
+    # If out of sync (errors occured), the underlines are not
+    # drawn since the editor is probably in a bad state.
+    #
+    underlines = SF::VertexArray.new(SF::Lines)
+
+    protocol.each_keyword_rule do |kwrule|
+      b = kwrule.header_start
+      e = kwrule.header_end
+      next unless sync?
+
+      b_pos = text.find_character_pos(b) + SF.vector2f(0, text.character_size * text.line_spacing)
+      e_pos = text.find_character_pos(e) + SF.vector2f(0, text.character_size * text.line_spacing)
+
+      underlines.append(SF::Vertex.new(b_pos, SF::Color::White))
+      underlines.append(SF::Vertex.new(e_pos, SF::Color::White))
+    end
+
+    underlines.draw(target, states)
+
+    #
     # Draw beam.
     #
     beam = SF::RectangleShape.new
@@ -953,14 +1214,14 @@ class ProtocolEditor
     markers.each_value do |marker|
       coords = text.find_character_pos(marker.offset)
 
-      # If cursor is in the line below marker offset, we actually
-      # want this marker to be above.
+      # If cursor is below marker offset, we want this marker
+      # to be above.
       m_line = buffer.line_at(marker.offset)
       c_line = buffer.line_at(cursor)
-      flip = c_line.ord == m_line.ord + 1
+      flip = c_line.ord > m_line.ord
 
       offset = SF.vector2f(0, text.character_size * text.line_spacing)
-      coords += flip ? SF.vector2f(3, 0) : offset
+      coords += flip ? SF.vector2f(3, -3.5) : offset
 
       # To enable variation while maintaining uniformity with
       # the original color.
@@ -1044,16 +1305,26 @@ class Cell < RoundEntity
 
   @wires = Set(Wire).new
 
+  def each_relative
+    @relatives.each do |copy|
+      yield copy
+    end
+  end
+
   def initialize
     super(self.class.color, lifespan: nil)
 
-    @store = Protocol.new
+    @protocol = Protocol.new
+
+    @relatives = [] of Cell
 
     @editor = uninitialized ProtocolEditor
-    @editor = ProtocolEditor.new(self, @store)
+    @editor = ProtocolEditor.new(self, @protocol)
+
+    @relatives << self
   end
 
-  def initialize(color : SF::Color, @store : Protocol, editor : ProtocolEditor)
+  def initialize(color : SF::Color, @protocol : Protocol, editor : ProtocolEditor, @relatives : Array(Cell))
     super(color, lifespan: nil)
 
     @editor = uninitialized ProtocolEditor
@@ -1061,7 +1332,9 @@ class Cell < RoundEntity
   end
 
   def copy
-    Cell.new(@color, @store, @editor)
+    copy = Cell.new(@color, @protocol, @editor, @relatives)
+    @relatives << copy
+    copy
   end
 
   def self.radius
@@ -1122,18 +1395,35 @@ class Cell < RoundEntity
     end
   end
 
+  def interpret(result : EvalResult)
+    return unless result.is_a?(ErrResult)
+
+    @tanks.each do |tank|
+      fail(result, tank)
+    end
+  end
+
+  def summon(*, in tank : Tank)
+    super
+    @protocol.born(self)
+    nil
+  end
+
+  def suicide(*, in tank : Tank)
+    super
+
+    @relatives.delete(self)
+
+    nil
+  end
+
   @handled = Set(UUID).new
 
   def receive(vesicle : Vesicle, in tank : Tank)
     return if vesicle.message.id.in?(@handled)
 
     @handled << vesicle.message.id
-
-    result = @store.ans(receiver: self, vesicle: vesicle)
-
-    return unless result.is_a?(ErrResult)
-
-    fail(result, tank)
+    @protocol.answer(receiver: self, vesicle: vesicle)
   end
 
   def fail(err : ErrResult, in tank : Tank)
@@ -1143,6 +1433,7 @@ class Cell < RoundEntity
     # In any case, add a mark to where the Lua code of the
     # declaration starts.
     tank.inspect(self) if tank.inspecting?(nil)
+
     @editor.unsync(err)
   end
 
@@ -1162,16 +1453,16 @@ class Cell < RoundEntity
   @corrupt_memory_hash : UInt64? = nil
 
   def heartbeat(in tank : Tank)
-    return unless hb = @store.heartbeat?
+    return unless hb = @protocol.heartbeat?
 
     # If heartbeat message was decided corrupt, was not modified,
     # and instance memory is the same, then the corrupt heartbeat
     # message shall not be run.
     return if hb.hash == @corrupt_heartbeat_hash && @memory.hash == @corrupt_memory_hash
 
-    result = hb.run(receiver: self, message: Message.new(UUID.random, @id, "heartbeat", [] of Memorable, 0))
+    result = hb.result(receiver: self, message: Message.new(UUID.random, @id, "heartbeat", [] of Memorable, 0))
     if result.is_a?(ErrResult)
-      @corrupt_heartbeat_hash = result.rule.hash
+      @corrupt_heartbeat_hash = hb.hash
       @corrupt_memory_hash = @memory.hash
       fail(result, in: tank)
       return
@@ -1866,7 +2157,7 @@ end
 # [x] vein -- emits events (msg), receives commands (msg). a rectangle
 # [x] vein should emit small distance, weak & fixed time, messages
 # [X] Wire -- connect to cell, transmit message, emit at the end
-# [ ] rewrite parser using line-oriented approach, keep offsets correct
+# [x] rewrite parser using line-oriented approach, keep offsets correct
 #     add support for comments using '--', add support for Lua header, e.g.
 #         -- This is implicitly stored under the "initialize" rule,
 #         -- which is automatically rerun on change.
@@ -1879,15 +2170,25 @@ end
 #         heartbeat |
 #           self.i = self.i + 1
 #
-#         heartbeat 300ms |
+#         TODO: heartbeat 300ms |
 #           self.j = self.j + 1
 #
 # [ ] add timed heartbeat overload syntax, e.g `heartbeat 300ms | ...`, `heartbeat 10ms | ...`,
 #     while simply `heartbeat |` will run on every frame
-# # [ ] wormhole wire -- listen at both ends, teleport to the opposite end
-#       represented by two circles at both ends connected by a 1px line
+# [ ] highlight relative cells when a cell is inspected
+# [ ] support cell removal
+# [ ] support clone using C-Shift-Rdrag
+# [ ] wormhole wire -- listen at both ends, teleport to the opposite end
+#       represented by two circles "regions" at both ends connected by a 1px line
 # [ ] scroll left/right/up/down when inspected protocoleditor cursor is out of view
 # [ ] underline message headers in protocoleditor
+# [ ] refactor, simplify, remove useless method dancing? use smaller
+#     objects, object-ize everything, get rid of getters and properties
+# [ ] implement save/load for the small objects & the system overall: save/load image feature
+# [ ] split into different files, use Crystal structure
+# [ ] write a few examples, record using GIF
+# [ ] write README
+# [ ] upload to GH
 
 app = App.new
 app.run
