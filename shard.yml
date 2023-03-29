@@ -1,0 +1,27 @@
+name: synapse
+version: 0.1.0
+
+# authors:
+#   - name <email@example.com>
+
+# description: |
+#   Short description of synapse
+
+dependencies:
+  crsfml:
+    github: oprypin/crsfml
+  chipmunk:
+    github: oprypin/crystal-chipmunk
+  lch:
+    github: homonoidian/lch.cr
+  lua:
+    github: veelenga/lua.cr
+#   pg:
+#     github: will/crystal-pg
+#     version: "~> 0.5"
+
+# development_dependencies:
+#   webmock:
+#     github: manastech/webmock.cr
+
+# license: MIT
