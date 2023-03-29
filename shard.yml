@@ -16,6 +16,7 @@ dependencies:
     github: homonoidian/lch.cr
   lua:
     github: veelenga/lua.cr
+    commit: e48a298
 #   pg:
 #     github: will/crystal-pg
 #     version: "~> 0.5"
