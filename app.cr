@@ -2181,13 +2181,16 @@ end
 # [ ] wormhole wire -- listen at both ends, teleport to the opposite end
 #       represented by two circles "regions" at both ends connected by a 1px line
 # [ ] scroll left/right/up/down when inspected protocoleditor cursor is out of view
-# [ ] underline message headers in protocoleditor
+# [x] underline message headers in protocoleditor
+# [ ] add drawableallocator to reuse shapes instead of reallocating them
+#     on every frame in draw(...); attach DA to App, pass to draw()s
+#     inside DA.frame { ... } in mainloop
 # [ ] refactor, simplify, remove useless method dancing? use smaller
 #     objects, object-ize everything, get rid of getters and properties
 # [ ] implement save/load for the small objects & the system overall: save/load image feature
 # [ ] split into different files, use Crystal structure
 # [ ] write a few examples, record using GIF
-# [ ] write README
+# [ ] write README with gifs
 # [ ] upload to GH
 
 app = App.new
