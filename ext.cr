@@ -8,6 +8,10 @@ struct Vector2
     @y = y.to_f64
   end
 
+  def initialize(sf : SF::Vector2)
+    initialize(sf.x, sf.y)
+  end
+
   # Adds components of this and *other*.
   def +(other : Vector2)
     (@x + other.x).at(@y + other.y)
@@ -46,6 +50,11 @@ struct Vector2
   # Returns the angle of this vector from origin.
   def angle
     Math.atan2(@y, @x)
+  end
+
+  # Componentwise max() with *other*.
+  def max(other : Vector2)
+    Math.max(@x, other.x).at(Math.max(@y, other.y))
   end
 
   # Returns the components of this vector in a tuple.

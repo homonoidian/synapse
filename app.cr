@@ -37,6 +37,7 @@ def fmessage_lifespan_ms(strength : Float)
 end
 
 module Inspectable
+  abstract def follow(in tank : Tank, view : SF::View) : SF::View
 end
 
 record Message, id : UUID, sender : UUID, keyword : String, args : Array(Memorable), strength : Float64, decay = 0.0
@@ -1033,8 +1034,13 @@ class ProtocolEditor
     end
   end
 
+  # **Warning**: invalid before the first draw.
+  getter origin : Vector2 = 0.at(0)
+  # **Warning**: invalid before the first draw.
+  getter corner : Vector2 = 0.at(0)
+
   def draw(target, states)
-    origin = @cell.mid + @cell.class.radius * 1.1
+    @origin = origin = @cell.mid + @cell.class.radius * 1.1
 
     texture = FONT.get_texture(13)
     texture.smooth = false
@@ -1044,6 +1050,9 @@ class ProtocolEditor
 
     text_width = text.global_bounds.width + text.local_bounds.left
     text_height = text.global_bounds.height + text.local_bounds.top
+
+    extent = SF.vector2f(text_width + 30, text_height + 30)
+    @corner = origin + Vector2.new(extent)
 
     sync_color = sync? ? SF::Color.new(0x81, 0xD4, 0xFA, 0x88) : SF::Color.new(0xEF, 0x9A, 0x9A, 0x88)
     sync_color_opaque = SF::Color.new(sync_color.r, sync_color.g, sync_color.b)
@@ -1073,12 +1082,12 @@ class ProtocolEditor
     bg_rect.position = (origin + 5.at(1)).sfi
     bg_rect.outline_thickness = 1
     bg_rect.outline_color = sync_color # SF::Color.new(0x42, 0x42, 0x42, 0xee)
-    bg_rect.size = SF.vector2f(text_width + 30, text_height + 30 - 2)
+    bg_rect.size = extent - SF.vector2f(0, 2)
     bg_rect.draw(target, states)
 
     #
     # Draw thick left bar which shows whether the code is
-    # synchronized with what's running.
+    # synchronized with what's running.s
     #
     bar = SF::RectangleShape.new
     bar.fill_color = sync_color
@@ -1186,6 +1195,7 @@ class ProtocolEditor
       mshadow_rect.size = mbg_rect_size
       mshadow_rect.fill_color = SF::Color.new(*LCH.lch2rgb(fg_l, c, h), 0x55)
       mshadow_rect.draw(target, states)
+      @corner = @corner.max(Vector2.new(mshadow_rect.position + mshadow_rect.size))
 
       #
       # Draw the little triangle in the corner, pointing to the
@@ -1295,6 +1305,42 @@ class Cell < RoundEntity
     end
 
     SF::Color.new *LCH.lch2rgb(l, c, hue.as(Int32))
+  end
+
+  def being_inspected?(in tank : Tank)
+    tank.inspecting?(self)
+  end
+
+  def follow(in tank : Tank, view : SF::View) : SF::View
+    return view unless being_inspected? in: tank
+
+    top_left = view.center - SF.vector2f(view.size.x/2, view.size.y/2)
+    bot_right = top_left + view.size
+
+    dx = 0
+    dy = 0
+
+    origin = @drawable.position - SF.vector2f(Cell.radius, Cell.radius)
+    corner = @editor.corner.sf + SF.vector2f(Cell.radius, Cell.radius)
+
+    if origin.x < top_left.x # Cell is to the left of the view
+      dx = origin.x - top_left.x
+    elsif bot_right.x < corner.x # Cell is to the right of the view
+      dx = corner.x - bot_right.x
+    end
+
+    if origin.y < top_left.y # Cell is above the view
+      dy = origin.y - top_left.y
+    elsif bot_right.y < corner.y # Cell is below the view
+      dy = corner.y - bot_right.y
+    end
+
+    return view if dx.zero? && dy.zero?
+
+    new_top_left = SF.vector2f(top_left.x + dx, top_left.y + dy)
+
+    view.center = new_top_left + view.size/2
+    view
   end
 
   def prn(message : String)
@@ -1420,7 +1466,7 @@ class Cell < RoundEntity
   def draw(tank : Tank, target)
     super
 
-    return unless tank.inspecting?(self)
+    return unless being_inspected?(in: tank)
 
     target.draw(@editor)
   end
@@ -1741,6 +1787,10 @@ class Tank
 
   include SF::Drawable
 
+  def follow(view : SF::View) : SF::View
+    @inspecting.try &.follow(in: self, view: view) || view
+  end
+
   def draw(target, states)
     # dd = SFMLDebugDraw.new(target, states)
     # dd.draw(@space)
@@ -1780,12 +1830,19 @@ abstract class Mode
 
   def draw(target, states)
   end
+
+  def tick(app)
+  end
 end
 
 MOUSE_ID = UUID.random
 
 class Mode::Normal < Mode
   def initialize(@elevated : Cell? = nil, @ondrop : Mode = self)
+  end
+
+  def tick(app)
+    app.follow unless @elevated
   end
 
   @clicks = 0
@@ -2020,6 +2077,10 @@ class App
     @editor.view = view
   end
 
+  def follow
+    @editor.view = @tank.follow(@editor.view)
+  end
+
   @factor = 1.0
 
   def zoom(factor : Number)
@@ -2076,7 +2137,9 @@ class App
       end
 
       @tt.tick
+
       @tank.tick(1/60)
+      @mode.tick(self)
 
       @editor.clear(SF::Color.new(0x21, 0x21, 0x21))
       @scene.clear(SF::Color::White)
@@ -2114,10 +2177,10 @@ end
 #           self.j = self.j + 1
 #
 # [x] make message header underline more dimmer (redesign message header highlight)
-# [ ] autocenter view on cell when in inspect mode
+# [x] autocenter view on cell when in inspect mode
+# [ ] highlight relative cells when a cell is inspected
 # [ ] add timed heartbeat overload syntax, e.g `heartbeat 300ms | ...`, `heartbeat 10ms | ...`,
 #     while simply `heartbeat |` will run on every frame
-# [ ] highlight relative cells when a cell is inspected
 # [ ] support cell removal
 # [ ] support clone using C-Middrag
 # [ ] wormhole wire -- listen at both ends, teleport to the opposite end
