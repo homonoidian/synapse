@@ -1307,12 +1307,26 @@ class Cell < RoundEntity
     SF::Color.new *LCH.lch2rgb(l, c, hue.as(Int32))
   end
 
-  def being_inspected?(in tank : Tank)
-    tank.inspecting?(self)
+  enum IRole
+    Main
+    Relative
+  end
+
+  def inspection_role?(in tank : Tank, is role : IRole? = nil) : IRole?
+    each_relative do |relative|
+      next unless tank.inspecting?(relative)
+
+      relative_role = same?(relative) ? IRole::Main : IRole::Relative
+      if role.nil? || relative_role == role
+        return relative_role
+      end
+    end
+
+    nil
   end
 
   def follow(in tank : Tank, view : SF::View) : SF::View
-    return view unless being_inspected? in: tank
+    return view unless inspection_role? in: tank, is: IRole::Main
 
     top_left = view.center - SF.vector2f(view.size.x/2, view.size.y/2)
     bot_right = top_left + view.size
@@ -1466,9 +1480,24 @@ class Cell < RoundEntity
   def draw(tank : Tank, target)
     super
 
-    return unless being_inspected?(in: tank)
+    return unless role = inspection_role? in: tank
 
-    target.draw(@editor)
+    #
+    # Draw halo
+    #
+    l, c, h = LCH.rgb2lch(@color.r, @color.g, @color.b)
+
+    halo = SF::CircleShape.new
+    halo.radius = Cell.radius * 1.15
+    halo.position = (mid - halo.radius).sf
+    halo.fill_color = SF::Color::Transparent
+    halo.outline_color = SF::Color.new(*LCH.lch2rgb(80, 50, h))
+    halo.outline_thickness = 1.5
+    target.draw(halo)
+
+    if role.main?
+      target.draw(@editor)
+    end
   end
 end
 
@@ -2178,10 +2207,13 @@ end
 #
 # [x] make message header underline more dimmer (redesign message header highlight)
 # [x] autocenter view on cell when in inspect mode
-# [ ] highlight relative cells when a cell is inspected
+# [x] halo relative cells when any cell is inspected
+# [ ] draw wires under cells
+# [ ] change color of wires to match cell color (exactly the same as halo!)
 # [ ] add timed heartbeat overload syntax, e.g `heartbeat 300ms | ...`, `heartbeat 10ms | ...`,
 #     while simply `heartbeat |` will run on every frame
 # [ ] support cell removal
+# [ ] fix bug: when a single cell±editor doesnt fit into screen (eg zoom) screen tearing occurs!!
 # [ ] support clone using C-Middrag
 # [ ] wormhole wire -- listen at both ends, teleport to the opposite end
 #       represented by two circles "regions" at both ends connected by a 1px line
