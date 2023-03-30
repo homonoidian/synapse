@@ -61,6 +61,14 @@ abstract class Entity
     end
   end
 
+  def self.z_index
+    0
+  end
+
+  def z_index
+    self.class.z_index
+  end
+
   abstract def drawable
 
   def summon(in tank : Tank)
@@ -1307,6 +1315,12 @@ class Cell < RoundEntity
     SF::Color.new *LCH.lch2rgb(l, c, hue.as(Int32))
   end
 
+  def halo_color
+    l, c, h = LCH.rgb2lch(@color.r, @color.g, @color.b)
+
+    SF::Color.new(*LCH.lch2rgb(80, 50, h))
+  end
+
   enum IRole
     Main
     Relative
@@ -1485,13 +1499,11 @@ class Cell < RoundEntity
     #
     # Draw halo
     #
-    l, c, h = LCH.rgb2lch(@color.r, @color.g, @color.b)
-
     halo = SF::CircleShape.new
     halo.radius = Cell.radius * 1.15
     halo.position = (mid - halo.radius).sf
     halo.fill_color = SF::Color::Transparent
-    halo.outline_color = SF::Color.new(*LCH.lch2rgb(80, 50, h))
+    halo.outline_color = SF::Color.new(halo_color.r, halo_color.g, halo_color.b, 0x88)
     halo.outline_thickness = 1.5
     target.draw(halo)
 
@@ -1562,15 +1574,15 @@ class Wire < Entity
   private getter drawable : SF::VertexArray
 
   def initialize(@src : Cell, @dst : Vector2)
-    super(self.class.color, lifespan: nil)
+    super(@src.halo_color, lifespan: nil)
 
     @drawable = SF::VertexArray.new(SF::Lines)
     @drawable.append(SF::Vertex.new(@src.mid.sf, @color))
     @drawable.append(SF::Vertex.new(@dst.sf, @color))
   end
 
-  def self.color
-    SF::Color.new(0x5C, 0x6B, 0xC0)
+  def self.z_index
+    -1
   end
 
   def includes?(other : Vector2)
@@ -1735,6 +1747,13 @@ class Tank
     end
   end
 
+  def each_entity_by_z_index
+    entities = @entities.values.unstable_sort_by!(&.z_index)
+    entities.each do |entity|
+      yield entity
+    end
+  end
+
   def each_cell
     each_entity do |entity|
       yield entity if entity.is_a?(Cell)
@@ -1828,8 +1847,10 @@ class Tank
   def draw(what : Symbol, target : SF::RenderTarget)
     case what
     when :entities
-      # Draw all entities except the inspected one (if any).
-      each_entity do |entity|
+      #
+      # Draw entities ordered by their z index.
+      #
+      each_entity_by_z_index do |entity|
         next if entity == @inspecting
 
         entity.draw(self, target)
@@ -2009,9 +2030,11 @@ class Mode::Wiring < Mode::Normal
     src = @wire.from.try &.mid || @mouse
     dst = @wire.to || @mouse
 
+    wire_color = @wire.from.try &.halo_color || SF::Color.new(0xBD, 0xBD, 0xBD)
+
     va = SF::VertexArray.new(SF::Lines)
-    va.append(SF::Vertex.new(src.sf, Wire.color))
-    va.append(SF::Vertex.new(dst.sf, Wire.color))
+    va.append(SF::Vertex.new(src.sf, wire_color))
+    va.append(SF::Vertex.new(dst.sf, wire_color))
 
     va.draw(target, states)
   end
@@ -2208,8 +2231,8 @@ end
 # [x] make message header underline more dimmer (redesign message header highlight)
 # [x] autocenter view on cell when in inspect mode
 # [x] halo relative cells when any cell is inspected
-# [ ] draw wires under cells
-# [ ] change color of wires to match cell color (exactly the same as halo!)
+# [x] draw wires under cells
+# [x] change color of wires to match cell color (exactly the same as halo!)
 # [ ] add timed heartbeat overload syntax, e.g `heartbeat 300ms | ...`, `heartbeat 10ms | ...`,
 #     while simply `heartbeat |` will run on every frame
 # [ ] support cell removal
