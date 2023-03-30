@@ -236,6 +236,10 @@ class Vesicle < RoundEntity
     @body.apply_impulse_at_local_point(impulse.cp, CP.v(0, 0))
   end
 
+  def self.z_index
+    1
+  end
+
   def message
     @message.copy_with(decay: @tt.progress(@decay_task_id))
   end
@@ -1684,6 +1688,12 @@ class Tank
     end
   end
 
+  def has_no_cells?
+    each_cell { return false }
+
+    true
+  end
+
   def insert(entity : Entity, object : CP::Shape | CP::Body)
     @space.add(object)
     if object.is_a?(CP::Body)
@@ -1871,6 +1881,18 @@ end
 abstract class Mode
   include SF::Drawable
 
+  def cursor(app : App)
+    app.default_cursor
+  end
+
+  def load(app : App)
+    app.editor_cursor = cursor(app)
+  end
+
+  def unload(app : App)
+    app.editor_cursor = app.default_cursor
+  end
+
   # Maps *event* to the next mode.
   def map(app, event)
     app.tank.handle(event)
@@ -1892,22 +1914,24 @@ class Mode::Normal < Mode
   end
 
   def tick(app)
+    super
     app.follow unless @elevated
   end
 
   @clicks = 0
-  @clickclock = SF::Clock.new
+  @clickclock : SF::Clock? = nil
 
   def map(app, event : SF::Event::MouseButtonPressed)
     coords = app.coords(event)
 
-    if @clickclock.elapsed_time.as_milliseconds < 300
+    if (cc = @clickclock) && cc.elapsed_time.as_milliseconds < 300
       @clicks = 2
     else
       @clicks = 1
     end
 
-    @clickclock.restart
+    cc = @clickclock ||= SF::Clock.new
+    cc.restart
 
     case event.button
     when .left?
@@ -1959,8 +1983,59 @@ class Mode::Normal < Mode
       return Mode::Wiring.new(WireConfig.new)
     when .escape?
       app.tank.inspect(nil)
+    when .delete?, .backspace?
+      if app.tank.inspecting?(nil)
+        return Mode::Slaying.new
+      end
     end
     super
+  end
+end
+
+class Mode::Slaying < Mode
+  def cursor(app : App)
+    SF::Cursor.from_system(SF::Cursor::Type::Cross)
+  end
+
+  # Delete cell only if LMB was pressed AND released over it.
+
+  @pressed_on : Cell?
+
+  def map(app, event : SF::Event::MouseButtonPressed)
+    return self unless event.button.left?
+
+    coords = app.coords(event)
+
+    @pressed_on = app.tank.find_cell_at?(coords)
+
+    self
+  end
+
+  def map(app, event : SF::Event::MouseButtonReleased)
+    coords = app.coords(event)
+
+    case event.button
+    when .left?
+      released_on = app.tank.find_cell_at?(coords)
+      if released_on && @pressed_on.same?(released_on)
+        released_on.suicide(in: app.tank)
+      end
+    end
+
+    app.tank.has_no_cells? ? Mode::Normal.new : self
+  end
+
+  def map(app, event : SF::Event::KeyPressed)
+    case event.code
+    when .escape?, .delete?, .backspace?
+      return Mode::Normal.new
+    end
+
+    self
+  end
+
+  def map(app, event)
+    self
   end
 end
 
@@ -2095,6 +2170,16 @@ end
 class App
   getter tank : Tank
 
+  @mode : Mode
+
+  private def mode=(other : Mode)
+    return if @mode.same?(other)
+
+    other.unload(self)
+    @mode = other
+    @mode.load(self)
+  end
+
   def initialize
     @editor = SF::RenderWindow.new(SF::VideoMode.new(1280, 720), title: "Synapse — Editor",
       settings: SF::ContextSettings.new(depth: 24, antialiasing: 8)
@@ -2112,6 +2197,17 @@ class App
 
     @tank.vein(to: 0.at(0))
     @tank.insert(Actor.new)
+
+    @mode = Mode::Normal.new
+    @mode.load(self)
+  end
+
+  def default_cursor
+    SF::Cursor.from_system(SF::Cursor::Type::Arrow)
+  end
+
+  def editor_cursor=(other : SF::Cursor)
+    @editor.mouse_cursor = other
   end
 
   def coords(event)
@@ -2153,8 +2249,6 @@ class App
     @editor.view = view
   end
 
-  @mode : Mode = Mode::Normal.new
-
   def run
     while @editor.open?
       while event = @editor.poll_event
@@ -2169,7 +2263,7 @@ class App
           view.zoom(@factor)
           @editor.view = view
         else
-          @mode = @mode.map(self, event)
+          self.mode = @mode.map(self, event)
         end
       end
 
@@ -2235,7 +2329,9 @@ end
 # [x] change color of wires to match cell color (exactly the same as halo!)
 # [ ] add timed heartbeat overload syntax, e.g `heartbeat 300ms | ...`, `heartbeat 10ms | ...`,
 #     while simply `heartbeat |` will run on every frame
-# [ ] support cell removal
+# [ ] animate what's in brackets `heartbeat [300ms] |` based on progress of
+#     the associated task (very tiny bit of dimmer/lighter; do not steal attention!)
+# [x] support cell removal
 # [ ] fix bug: when a single cell±editor doesnt fit into screen (eg zoom) screen tearing occurs!!
 # [ ] support clone using C-Middrag
 # [ ] wormhole wire -- listen at both ends, teleport to the opposite end
