@@ -1710,7 +1710,7 @@ class Tank
   end
 
   def remove(entity : Entity, object : CP::Shape | CP::Body)
-    @space.remove(object) if @space.contains?(object)
+    @space.remove(object)
     if object.is_a?(CP::Body)
       @bodies.delete(object.object_id)
     end
@@ -2331,7 +2331,11 @@ end
 #     while simply `heartbeat |` will run on every frame
 # [ ] animate what's in brackets `heartbeat [300ms] |` based on progress of
 #     the associated task (very tiny bit of dimmer/lighter; do not steal attention!)
+# [ ] Wheel for Yscroll in Normal mode, Shift-Wheel for X scroll
 # [x] support cell removal
+# [ ] In Mode#draw(), draw hint panel which says what mode it is and how to
+#     use it; draw into a separate RenderTexture for no zoom on it; hide panel
+#     after some time using TimeTable and Mode#tick
 # [ ] fix bug: when a single cell±editor doesnt fit into screen (eg zoom) screen tearing occurs!!
 # [ ] support clone using C-Middrag
 # [ ] wormhole wire -- listen at both ends, teleport to the opposite end
@@ -2339,6 +2343,7 @@ end
 # [ ] scroll left/right/up/down when inspected protocoleditor cursor is out of view
 # [x] underline message headers in protocoleditor
 # [ ] add selection rectangle (c-shift mode) to drag/copy/clone/delete multiple cells
+# [ ] text zoom not pixelation!!! use normal TTF an try to have dynamic text size
 # [ ] add drawableallocator to reuse shapes instead of reallocating them
 #     on every frame in draw(...); attach DA to App, pass to draw()s
 #     inside DA.frame { ... } in mainloop
