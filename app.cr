@@ -1033,83 +1033,6 @@ class ProtocolEditor
     end
   end
 
-  # def parse
-  #   error = nil
-  #   source = self.source.strip
-
-  #   signatures = Set({String, Int32}).new
-
-  #   hint_color = SF::Color.new(0xFF, 0xCA, 0x28)
-
-  #   if source.empty?
-  #     self.sync = true
-  #     protocol.sync(signatures)
-  #     return
-  #   end
-
-  #   # Here's the syntax we're (roughly) aiming for.
-  #   #
-  #   #   <top> ::= <Rule>*
-  #   #   <Rule> ::= <messageName> (WS <messageParam>)* WS "|" <messageBody>
-  #   #   <messageBody> ::= <indent> [lua code] <dedent>
-  #   #   <messageName> ::= [A-Za-z]\w*
-  #   #   <messageParam> ::= [A-Za-z]\w*
-  #   s = StringScanner.new(source)
-
-  #   until s.eos?
-  #     offset = s.offset
-
-  #     unless name = s.scan(/(?:[A-Za-z]\w*)/)
-  #       error = Marker.new(hint_color, s.offset, "I want message name here!")
-  #       break
-  #     end
-
-  #     params = [] of String
-  #     while param = s.scan(/\s+(?:[A-Za-z]\w*)/)
-  #       params << param.strip
-  #     end
-
-  #     unless s.scan(/\s+\|/)
-  #       error = Marker.new(hint_color, s.offset, "I want space followed by pipe '|' here!")
-  #       break
-  #     end
-
-  #     lua = ""
-
-  #     unless s.check(/\r?\n\s+|$/)
-  #       error = Marker.new(hint_color, s.offset, "I want this line to end! You should indent here, and then type some Lua.")
-  #       break
-  #     end
-
-  #     # Rest is presumably a bunch of Lua lines like so:
-  #     #
-  #     #   <NL> <INDENT SPACES> line of lua ...
-  #     #   <NL> <INDENT SPACES> line of lua ...
-  #     #   ...
-  #     #
-  #     # While lines have even one leading whitespace, we should
-  #     # consider them part of the Lua code. Therefore, let's
-  #     # scan until there is a line *without* leading whitespace.
-  #     lua = s.scan_until(/\r?\n(?=[^ \t])|$/) || lua
-
-  #     signatures << {name, params.size}
-
-  #     # Now we have all it takes to create a message rule.
-  #     # Create it and update with the existing decls.
-  #     protocol.update Rule.new(name, params, lua, offset)
-  #   end
-
-  #   unless error
-  #     self.sync = true
-  #     protocol.sync(signatures)
-  #     return
-  #   end
-
-  #   mark(error)
-
-  #   self.sync = false
-  # end
-
   def draw(target, states)
     origin = @cell.mid + @cell.class.radius * 1.1
 
@@ -1149,7 +1072,7 @@ class ProtocolEditor
     bg_rect.fill_color = SF::Color.new(0x42, 0x42, 0x42, 0xbb)
     bg_rect.position = (origin + 5.at(1)).sfi
     bg_rect.outline_thickness = 1
-    bg_rect.outline_color = SF::Color.new(0x42, 0x42, 0x42, 0xee)
+    bg_rect.outline_color = sync_color # SF::Color.new(0x42, 0x42, 0x42, 0xee)
     bg_rect.size = SF.vector2f(text_width + 30, text_height + 30 - 2)
     bg_rect.draw(target, states)
 
@@ -1170,23 +1093,40 @@ class ProtocolEditor
     # indices are assumed to be on the same line.
     #
     # If out of sync (errors occured), the underlines are not
-    # drawn since the editor is probably in a bad state.
+    # drawn since the editor is probably in a bad state or they
+    # would be drawn incorrectly anyway.
     #
-    underlines = SF::VertexArray.new(SF::Lines)
+    rule_headers = [] of SF::RectangleShape
+    rule_header_bg = SF::Color.new(0x51, 0x51, 0x51)
 
     protocol.each_keyword_rule do |kwrule|
-      b = kwrule.header_start
-      e = kwrule.header_end
       next unless sync?
 
-      b_pos = text.find_character_pos(b) + SF.vector2f(0, text.character_size * text.line_spacing)
-      e_pos = text.find_character_pos(e) + SF.vector2f(0, text.character_size * text.line_spacing)
+      b = kwrule.header_start
 
-      underlines.append(SF::Vertex.new(b_pos, SF::Color::White))
-      underlines.append(SF::Vertex.new(e_pos, SF::Color::White))
+      b_pos = text.find_character_pos(b)
+
+      h_bg = SF::RectangleShape.new
+      h_bg.position = SF.vector2f(bg_rect.position.x, b_pos.y)
+      h_bg.size = SF.vector2f(bg_rect.size.x, text.character_size * text.line_spacing)
+      h_bg.fill_color = rule_header_bg
+
+      h_sep_top = SF::RectangleShape.new
+      h_sep_top.position = h_bg.position
+      h_sep_top.size = SF.vector2f(h_bg.size.x, 1)
+      h_sep_top.fill_color = SF::Color.new(0x61, 0x61, 0x61)
+
+      h_sep_bot = SF::RectangleShape.new
+      h_sep_bot.position = h_bg.position + SF.vector2f(0, h_bg.size.y)
+      h_sep_bot.size = SF.vector2f(h_bg.size.x, 1)
+      h_sep_bot.fill_color = SF::Color.new(0x61, 0x61, 0x61)
+
+      rule_headers << h_bg
+      rule_headers << h_sep_top
+      rule_headers << h_sep_bot
     end
 
-    underlines.draw(target, states)
+    rule_headers.each &.draw(target, states)
 
     #
     # Draw beam.
@@ -1198,14 +1138,14 @@ class ProtocolEditor
     cur = text.find_character_pos(cursor)
     nxt = text.find_character_pos(cursor + 1)
 
-    beam.position = cur + SF.vector2f(1, 0)
-    beam.size = SF.vector2f(Math.max(6, nxt.x - cur.x), text.character_size * text.line_spacing)
+    beam.position = cur + SF.vector2f(1, text.character_size * (text.line_spacing - 1)/2)
+    beam.size = SF.vector2f(Math.max(6, nxt.x - cur.x), text.character_size)
     beam.draw(target, states)
 
     #
     # Draw buffer contents.
     #
-    text.fill_color = SF::Color.new(0xF5, 0xF5, 0xF5)
+    text.fill_color = SF::Color.new(0xee, 0xee, 0xee)
     text.draw(target, states)
 
     #
@@ -2173,15 +2113,18 @@ end
 #         TODO: heartbeat 300ms |
 #           self.j = self.j + 1
 #
+# [x] make message header underline more dimmer (redesign message header highlight)
+# [ ] autocenter view on cell when in inspect mode
 # [ ] add timed heartbeat overload syntax, e.g `heartbeat 300ms | ...`, `heartbeat 10ms | ...`,
 #     while simply `heartbeat |` will run on every frame
 # [ ] highlight relative cells when a cell is inspected
 # [ ] support cell removal
-# [ ] support clone using C-Shift-Rdrag
+# [ ] support clone using C-Middrag
 # [ ] wormhole wire -- listen at both ends, teleport to the opposite end
 #       represented by two circles "regions" at both ends connected by a 1px line
 # [ ] scroll left/right/up/down when inspected protocoleditor cursor is out of view
 # [x] underline message headers in protocoleditor
+# [ ] add selection rectangle (c-shift mode) to drag/copy/clone/delete multiple cells
 # [ ] add drawableallocator to reuse shapes instead of reallocating them
 #     on every frame in draw(...); attach DA to App, pass to draw()s
 #     inside DA.frame { ... } in mainloop
@@ -2189,6 +2132,7 @@ end
 #     objects, object-ize everything, get rid of getters and properties
 # [ ] implement save/load for the small objects & the system overall: save/load image feature
 # [ ] split into different files, use Crystal structure
+# [ ] optimize?
 # [ ] write a few examples, record using GIF
 # [ ] write README with gifs
 # [ ] upload to GH
