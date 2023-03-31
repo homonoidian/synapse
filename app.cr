@@ -1975,6 +1975,12 @@ class Mode::Normal < Mode
     self
   end
 
+  def map(app, event : SF::Event::MouseWheelScrolled)
+    app.pan(0.at(-event.delta * 10))
+
+    self
+  end
+
   def map(app, event : SF::Event::KeyPressed)
     case event.code
     when .l_control?, .r_control?
@@ -2052,6 +2058,13 @@ class Mode::Wiring < Mode::Normal
 
   def submit(app : App, src : Cell, dst : Vector2)
     app.tank.wire(from: src, to: dst)
+  end
+
+  # TODO: less hard coded: Wiring may not have been On-Shift
+  def map(app, event : SF::Event::MouseWheelScrolled)
+    app.pan((-event.delta * 10).at(0))
+
+    self
   end
 
   def map(app, event : SF::Event::MouseButtonPressed)
@@ -2327,12 +2340,13 @@ end
 # [x] halo relative cells when any cell is inspected
 # [x] draw wires under cells
 # [x] change color of wires to match cell color (exactly the same as halo!)
+# [x] support cell removal
+# [x] underline message headers in protocoleditor
+# [x] Wheel for Yscroll in Normal mode, Shift-Wheel for X scroll
 # [ ] add timed heartbeat overload syntax, e.g `heartbeat 300ms | ...`, `heartbeat 10ms | ...`,
 #     while simply `heartbeat |` will run on every frame
 # [ ] animate what's in brackets `heartbeat [300ms] |` based on progress of
 #     the associated task (very tiny bit of dimmer/lighter; do not steal attention!)
-# [ ] Wheel for Yscroll in Normal mode, Shift-Wheel for X scroll
-# [x] support cell removal
 # [ ] In Mode#draw(), draw hint panel which says what mode it is and how to
 #     use it; draw into a separate RenderTexture for no zoom on it; hide panel
 #     after some time using TimeTable and Mode#tick
@@ -2341,7 +2355,6 @@ end
 # [ ] wormhole wire -- listen at both ends, teleport to the opposite end
 #       represented by two circles "regions" at both ends connected by a 1px line
 # [ ] scroll left/right/up/down when inspected protocoleditor cursor is out of view
-# [x] underline message headers in protocoleditor
 # [ ] add selection rectangle (c-shift mode) to drag/copy/clone/delete multiple cells
 # [ ] text zoom not pixelation!!! use normal TTF an try to have dynamic text size
 # [ ] add drawableallocator to reuse shapes instead of reallocating them
