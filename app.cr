@@ -280,8 +280,8 @@ record ErrResult < EvalResult, error : Lua::LuaError | ArgumentError, rule : Rul
   end
 end
 
-class KeywordResponseContext
-  def initialize(@rule : KeywordRule, @receiver : Cell, @message : Message, @attack = 0.0)
+class ResponseContext
+  def initialize(@rule : KeywordRule, @receiver : Cell)
     @strength = 120.0
   end
 
@@ -464,7 +464,22 @@ class KeywordResponseContext
 
   # Populates *stack* with globals related to this response context.
   def fill(stack : Lua::Stack)
+    stack.set_global("self", @receiver.memory)
     stack.set_global("id", @receiver.id.to_s)
+    stack.set_global("heading", ->heading(LibLua::State))
+    stack.set_global("strength", ->strength(LibLua::State))
+    stack.set_global("send", ->send(LibLua::State))
+    stack.set_global("swim", ->swim(LibLua::State))
+  end
+end
+
+class MessageResponseContext < ResponseContext
+  def initialize(rule : KeywordRule, receiver : Cell, @message : Message, @attack = 0.0)
+    super(rule, receiver)
+  end
+
+  def fill(stack : Lua::Stack)
+    super
 
     stack.set_global("sender", @message.sender.to_s)
     stack.set_global("impact", @message.strength)
@@ -472,12 +487,6 @@ class KeywordResponseContext
 
     stack.set_global("attack", Math.degrees(@attack))
     stack.set_global("evasion", Math.degrees(Math.opposite(@attack)))
-
-    stack.set_global("heading", ->heading(LibLua::State))
-
-    stack.set_global("strength", ->strength(LibLua::State))
-    stack.set_global("send", ->send(LibLua::State))
-    stack.set_global("swim", ->swim(LibLua::State))
   end
 end
 
@@ -488,6 +497,20 @@ abstract class Rule
   def index
     @lua.start
   end
+end
+
+abstract struct RuleSignature
+end
+
+record KeywordRuleSignature < RuleSignature, keyword : String, arity : Int32 do
+  def_equals_and_hash keyword, arity
+end
+record HeartbeatRuleSignature < RuleSignature, period : Time::Span? do
+  def keyword
+    "heartbeat"
+  end
+
+  def_equals_and_hash period
 end
 
 class BirthRule < Rule
@@ -562,16 +585,15 @@ class KeywordRule < Rule
   end
 
   def signature
-    {@keyword.string, @params.size}
+    KeywordRuleSignature.new(@keyword.string, @params.size)
   end
 
   def result(receiver : Cell, message : Message, attack = 0.0) : EvalResult
-    response = KeywordResponseContext.new(self, receiver, message, attack)
-
     stack = Lua::Stack.new
-    response.fill(stack)
 
-    stack.set_global("self", receiver.memory)
+    res = MessageResponseContext.new(self, receiver, message, attack)
+    res.fill(stack)
+
     @params.zip(message.args) do |param, arg|
       stack.set_global(param.string, arg)
     end
@@ -588,13 +610,17 @@ class KeywordRule < Rule
     end
   end
 
+  def changed
+  end
+
   def update(for cell : Cell, newer : KeywordRule)
-    return self if self == newer
     return newer unless @keyword == newer.@keyword
+    return self if self == newer
 
     @params = newer.@params
     @lua = newer.@lua
     @id = UUID.random
+    changed
 
     self
   end
@@ -607,18 +633,107 @@ class KeywordRule < Rule
   def_equals_and_hash @id
 end
 
+class HeartbeatRule < KeywordRule
+  def initialize(keyword : Excerpt, lua : Excerpt, @period : Time::Span?)
+    super(keyword, [] of Excerpt, lua)
+
+    @clock = SF::Clock.new
+  end
+
+  def signature
+    HeartbeatRuleSignature.new(@period)
+  end
+
+  @corrupt = false
+
+  def changed
+    @corrupt = false
+  end
+
+  # Returns the amount of *pending* lapses for this heartbeat
+  # rule. Caps to *cap*.
+  def lapses(period : Time::Span, cap = 4)
+    delta = @clock.elapsed_time.as_milliseconds - period.total_milliseconds
+
+    return unless delta >= 0
+
+    # We might have missed some...
+    lapses = (delta / period.total_milliseconds).trunc + 1
+
+    Math.min(cap, lapses.to_i)
+  end
+
+  # Systole is the "body" of a cell's heartbeat: at systole,
+  # heartbeat rules are triggered.
+  def systole(for receiver : Cell)
+    # If heartbeat message was decided corrupt, then it shall
+    # not be run.
+    return if @corrupt
+
+    if period = @period
+      return unless count = lapses(period)
+    else
+      count = 1
+    end
+
+    result = uninitialized EvalResult
+
+    # Count is at all times at least = 1, therefore, result
+    # will be initialized.
+    count.times do
+      break if @corrupt
+
+      stack = Lua::Stack.new
+
+      # TODO: heartbeatresponsecontext, mainly to change period dynamically
+      res = ResponseContext.new(self, receiver)
+      res.fill(stack)
+
+      begin
+        stack.run(@lua.string, "heartbeat:#{@period}")
+        result = OkResult.new
+      rescue e : Lua::LuaError
+        result = ErrResult.new(e, self)
+      rescue e : ArgumentError
+        result = ErrResult.new(e, self)
+      ensure
+        stack.close
+      end
+
+      @corrupt = result.is_a?(ErrResult)
+    end
+
+    result
+  end
+
+  # Dyastole resets heartbeat rules.
+  def dyastole(for receiver : Cell)
+    return unless period = @period
+    return unless lapses(period)
+
+    @clock.restart
+  end
+end
+
 class Protocol
   getter id : UUID
 
   def initialize
     @id = UUID.random
-    @rules = {} of {String, Int32} => KeywordRule
+    @rules = {} of RuleSignature => KeywordRule
     @birth = BirthRule.new(Excerpt.new("", 0))
   end
 
   def each_keyword_rule
     @rules.each_value do |kwrule|
       yield kwrule
+    end
+  end
+
+  def each_heartbeat_rule
+    # TODO: use a separate array of HeartbeatRules
+    @rules.each_value do |rule|
+      yield rule if rule.is_a?(HeartbeatRule)
     end
   end
 
@@ -634,17 +749,17 @@ class Protocol
     @birth = @birth.update(cell, newer)
   end
 
-  def fetch_rule?(keyword : String, nargs : Int32)
-    @rules[{keyword, nargs}]?
+  def fetch_rule?(signature : RuleSignature)
+    @rules[signature]?
   end
 
-  def sync(signatures : Set({String, Int32}))
+  def sync(signatures : Set(RuleSignature))
     # Delete those decls that are not in the keys array.
     @rules = @rules.reject { |key, _| !key.in?(signatures) }
   end
 
   def answer(receiver : Cell, vesicle : Vesicle)
-    return unless rule = fetch_rule?(vesicle.keyword, vesicle.nargs)
+    return unless rule = fetch_rule?(KeywordRuleSignature.new(vesicle.keyword, vesicle.nargs))
 
     # Attack is a heading pointing hdg the vesicle.
     delta = (vesicle.mid - receiver.mid)
@@ -655,12 +770,6 @@ class Protocol
 
   def born(receiver : Cell)
     @birth.answer(receiver)
-  end
-
-  # Fetches the heartbeat message declaration. Returns nil if
-  # none is found.
-  def heartbeat?
-    fetch_rule?("heartbeat", nargs: 0)
   end
 end
 
@@ -736,6 +845,12 @@ record ParseResult, rule : Rule? = nil, markers = [] of Marker do
   def self.keyword(keyword : Excerpt, params : Array(Excerpt), lua : Excerpt)
     new(rule: KeywordRule.new(keyword, params, lua))
   end
+
+  # A shorthand for a success result with `HeartbeatRule` rule
+  # and no markers.
+  def self.heartbeat(keyword : Excerpt, lua : Excerpt, period : Time::Span? = nil)
+    new(rule: HeartbeatRule.new(keyword, lua, period))
+  end
 end
 
 # Blocks are intermediates between raw source and `Rule`s.
@@ -779,31 +894,67 @@ record RuleBlock < Block, header : Excerpt, code : Excerpt do
       return ParseResult.hint(start, "I want keyword (aka message name) here!")
     end
 
+    heartbeat = keyword == "heartbeat"
     keyword = Excerpt.new(keyword, start)
 
-    #
-    # Parse message parameters. Parameters follow the keyword,
-    # therefore, a leading whitespace is always expected.
-    #
-    # <params> ::= (WS <param>)*
-    # <param> ::= <alpha> <alnum>*
-    #
-    start = header.map(scanner.offset)
-    params = [] of Excerpt
-    while param = scanner.scan(/[ \t]+(?:[A-Za-z]\w*)/)
-      params << Excerpt.new(param, start).strip
+    if heartbeat
+      #
+      # Parse heartbeat. Heartbeat does not take parameters.
+      # It's either a period or the pipe.
+      #
+      # <heartbeat> ::= "heartbeat" WS (<period> | "|")
+      #
       start = header.map(scanner.offset)
+
+      unless scanner.scan(/[ \t]+/)
+        return ParseResult.hint(start, "I want whitespace here!")
+      end
+
+      start = header.map(scanner.offset)
+
+      if number = scanner.scan(/[1-9][0-9]*/)
+        start = header.map(scanner.offset)
+
+        unless unit = scanner.scan(/m?s/)
+          return ParseResult.hint(start, "I want a time unit here, either 'ms' (for milliseconds) or 's' (for seconds)")
+        end
+
+        case unit
+        when "ms"
+          period = number.to_i.milliseconds
+        when "s"
+          period = number.to_i.seconds
+        end
+      end
+
+      result = ParseResult.heartbeat(keyword, code, period)
+    else
+      #
+      # Parse message parameters. Parameters follow the keyword,
+      # therefore, a leading whitespace is always expected.
+      #
+      # <params> ::= (WS <param>)*
+      # <param> ::= <alpha> <alnum>*
+      #
+      start = header.map(scanner.offset)
+      params = [] of Excerpt
+      while param = scanner.scan(/[ \t]+(?:[A-Za-z]\w*)/)
+        params << Excerpt.new(param, start).strip
+        start = header.map(scanner.offset)
+      end
+
+      result = ParseResult.keyword(keyword, params, code)
     end
 
     #
     # Make sure that the pipe character itself is in the
     # right place.
     #
-    unless scanner.scan(/[ \t]+\|/)
+    unless scanner.scan(/[ \t]*\|/)
       return ParseResult.hint(header.map(scanner.offset), "I want space followed by pipe '|' here!")
     end
 
-    ParseResult.keyword(keyword, params, code)
+    result
   end
 end
 
@@ -1018,7 +1169,7 @@ class ProtocolEditor
 
   def parse
     results = parse(source)
-    signatures = Set({String, Int32}).new
+    signatures = Set(RuleSignature).new
     if results.empty?
       self.sync = true
       protocol.sync(signatures)
@@ -1030,7 +1181,6 @@ class ProtocolEditor
     results.each do |result|
       if rule = result.rule
         rule.signature(to: signatures)
-
         protocol.update(for: @cell, newer: rule)
       else
         error = true
@@ -1250,7 +1400,7 @@ class Cell < RoundEntity
   class InstanceMemory
     include LuaCallable
 
-    def initialize
+    def initialize(@cell : Cell)
       @store = {} of String => Memorable
     end
 
@@ -1260,18 +1410,15 @@ class Cell < RoundEntity
 
     def _newindex(key : String, val : Memorable)
       @store[key] = val
+      @cell.on_memory_changed
     end
   end
 
-  getter memory = InstanceMemory.new
+  getter memory : InstanceMemory do
+    InstanceMemory.new(self)
+  end
 
   @wires = Set(Wire).new
-
-  def each_relative
-    @relatives.each do |copy|
-      yield copy
-    end
-  end
 
   def initialize
     super(self.class.color, lifespan: nil)
@@ -1317,6 +1464,12 @@ class Cell < RoundEntity
     end
 
     SF::Color.new *LCH.lch2rgb(l, c, hue.as(Int32))
+  end
+
+  def each_relative
+    @relatives.each do |copy|
+      yield copy
+    end
   end
 
   def halo_color
@@ -1467,32 +1620,26 @@ class Cell < RoundEntity
     true
   end
 
-  @corrupt_heartbeat_hash : UInt64? = nil
-  @corrupt_memory_hash : UInt64? = nil
+  def on_memory_changed
+    # The success of heartbeat rules also depends on the memory.
+    # If memory changed, try to rerun heartbeat rules.
+    @protocol.each_heartbeat_rule &.changed
+  end
 
-  def heartbeat(in tank : Tank)
-    return unless hb = @protocol.heartbeat?
-
-    # If heartbeat message was decided corrupt, was not modified,
-    # and instance memory is the same, then the corrupt heartbeat
-    # message shall not be run.
-    return if hb.hash == @corrupt_heartbeat_hash && @memory.hash == @corrupt_memory_hash
-
-    result = hb.result(receiver: self, message: Message.new(UUID.random, @id, "heartbeat", [] of Memorable, 0))
-    if result.is_a?(ErrResult)
-      @corrupt_heartbeat_hash = hb.hash
-      @corrupt_memory_hash = @memory.hash
-      fail(result, in: tank)
-      return
-    else
-      @corrupt_heartbeat_hash = nil
-      @corrupt_memory_hash = nil
+  # Prefer using `Tank` to calling this method yourself because
+  # sync of systoles/dyastoles between relatives is unsupported.
+  def systole(in tank : Tank)
+    @protocol.each_heartbeat_rule do |hb|
+      result = hb.systole(for: self)
+      if result.is_a?(ErrResult)
+        fail(result, in: tank)
+      end
     end
   end
 
-  def tick(delta : Float, in tank : Tank)
-    super
-    heartbeat(in: tank)
+  # :ditto:
+  def dyastole(in tank : Tank)
+    @protocol.each_heartbeat_rule &.dyastole(for: self)
   end
 
   def draw(tank : Tank, target)
@@ -1624,6 +1771,8 @@ class Actor
 end
 
 class Tank
+  include SF::Drawable
+
   class TankDispatcher < CP::CollisionHandler
     def initialize(@tank : Tank)
       super()
@@ -1837,13 +1986,15 @@ class Tank
     @tt.tick
     @space.step(delta)
     each_entity &.tick(delta, in: self)
+    # TODO: avoid going thru all entities thrice: segregate cells
+    # into another collection?
+    each_cell &.systole(in: self)
+    each_cell &.dyastole(in: self)
   end
 
   def handle(event : SF::Event)
     @inspecting.try &.handle(event)
   end
-
-  include SF::Drawable
 
   def follow(view : SF::View) : SF::View
     @inspecting.try &.follow(in: self, view: view) || view
@@ -2332,7 +2483,7 @@ end
 #         heartbeat |
 #           self.i = self.i + 1
 #
-#         TODO: heartbeat 300ms |
+#         heartbeat 300ms |
 #           self.j = self.j + 1
 #
 # [x] make message header underline more dimmer (redesign message header highlight)
@@ -2343,7 +2494,7 @@ end
 # [x] support cell removal
 # [x] underline message headers in protocoleditor
 # [x] Wheel for Yscroll in Normal mode, Shift-Wheel for X scroll
-# [ ] add timed heartbeat overload syntax, e.g `heartbeat 300ms | ...`, `heartbeat 10ms | ...`,
+# [x] add timed heartbeat overload syntax, e.g `heartbeat 300ms | ...`, `heartbeat 10ms | ...`,
 #     while simply `heartbeat |` will run on every frame
 # [ ] animate what's in brackets `heartbeat [300ms] |` based on progress of
 #     the associated task (very tiny bit of dimmer/lighter; do not steal attention!)
@@ -2362,6 +2513,8 @@ end
 #     inside DA.frame { ... } in mainloop
 # [ ] refactor, simplify, remove useless method dancing? use smaller
 #     objects, object-ize everything, get rid of getters and properties
+#     in Cell, e.g. refactor all methods that use (*, in tank : Tank) to a
+#     separate object e.g. CellView
 # [ ] implement save/load for the small objects & the system overall: save/load image feature
 # [ ] split into different files, use Crystal structure
 # [ ] optimize?
