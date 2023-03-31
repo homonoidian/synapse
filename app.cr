@@ -1507,6 +1507,12 @@ class Cell < RoundEntity
 
     origin = @drawable.position - SF.vector2f(Cell.radius, Cell.radius)
     corner = @editor.corner.sf + SF.vector2f(Cell.radius, Cell.radius)
+    extent = corner - origin
+
+    if view.size.x < extent.x || view.size.y < extent.y
+      # Give up: object doesn't fit into the view.
+      return view
+    end
 
     if origin.x < top_left.x # Cell is to the left of the view
       dx = origin.x - top_left.x
@@ -2496,12 +2502,12 @@ end
 # [x] Wheel for Yscroll in Normal mode, Shift-Wheel for X scroll
 # [x] add timed heartbeat overload syntax, e.g `heartbeat 300ms | ...`, `heartbeat 10ms | ...`,
 #     while simply `heartbeat |` will run on every frame
+# [x] fix bug: when a single cell±editor doesnt fit into screen (eg zoom) screen tearing occurs!!
 # [ ] animate what's in brackets `heartbeat [300ms] |` based on progress of
 #     the associated task (very tiny bit of dimmer/lighter; do not steal attention!)
 # [ ] In Mode#draw(), draw hint panel which says what mode it is and how to
 #     use it; draw into a separate RenderTexture for no zoom on it; hide panel
 #     after some time using TimeTable and Mode#tick
-# [ ] fix bug: when a single cell±editor doesnt fit into screen (eg zoom) screen tearing occurs!!
 # [ ] support clone using C-Middrag
 # [ ] wormhole wire -- listen at both ends, teleport to the opposite end
 #       represented by two circles "regions" at both ends connected by a 1px line
