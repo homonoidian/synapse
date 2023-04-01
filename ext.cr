@@ -217,3 +217,40 @@ class TimeTable
     completed.each { |task| cancel(task) }
   end
 end
+
+class String
+  # Yields segments of this string as per *regexes* and the
+  # given *group*: that is, yield the portion of this string
+  # before the match group, the match group itself (i.e, as
+  # `Regex::MatchData`), followed by the portion of this string
+  # after the match group.
+  #
+  # Which match from *regexes* is selected is determined by
+  # running all regexes against the remaining string, and
+  # finding the *closest* one that matches.
+  def each_segment(regexes : Indexable(Regex), group = 0)
+    start = 0
+
+    loop do
+      # Match all regexes at position.
+      matches = regexes.compact_map { |regex| match(regex, start) }
+
+      # Find the closest match to start
+      break unless match = matches.min_by?(&.begin)
+
+      # Yield everything before the match.
+      if match.begin(group) > start
+        yield self[start...match.begin(group)], start
+      end
+
+      # Yield match.
+      yield match, match.begin(group)
+
+      start = match.end(group)
+    end
+
+    if start < size
+      yield self[start..], start
+    end
+  end
+end

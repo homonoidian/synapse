@@ -15,7 +15,13 @@ require "./ext"
 require "./line"
 require "./buffer"
 
-FONT = SF::Font.from_memory({{read_file("../../.local/share/fonts/cozette.bdf")}}.to_slice)
+FONT        = SF::Font.from_memory({{read_file("./scientifica.otb")}}.to_slice)
+FONT_BOLD   = SF::Font.from_memory({{read_file("./scientificaBold.otb")}}.to_slice)
+FONT_ITALIC = SF::Font.from_memory({{read_file("./scientificaItalic.otb")}}.to_slice)
+
+FONT.get_texture(11).smooth = false
+FONT_BOLD.get_texture(11).smooth = false
+FONT_ITALIC.get_texture(11).smooth = false
 
 # https://www.desmos.com/calculator/6rnk1vp9su
 def fmessage_amount(strength : Float)
@@ -499,13 +505,24 @@ abstract class Rule
   end
 end
 
-abstract struct RuleSignature
+abstract class RuleSignature
 end
 
-record KeywordRuleSignature < RuleSignature, keyword : String, arity : Int32 do
+class KeywordRuleSignature < RuleSignature
+  getter keyword, arity
+
+  def initialize(@keyword : String, @arity : Int32)
+  end
+
   def_equals_and_hash keyword, arity
 end
-record HeartbeatRuleSignature < RuleSignature, period : Time::Span? do
+
+class HeartbeatRuleSignature < RuleSignature
+  getter period
+
+  def initialize(@period : Int32?)
+  end
+
   def keyword
     "heartbeat"
   end
@@ -562,18 +579,20 @@ class BirthRule < Rule
 end
 
 class KeywordRule < Rule
+  getter keyword
+
   def initialize(@keyword : Excerpt, @params : Array(Excerpt), lua : Excerpt)
     super(lua)
 
     @id = UUID.random
   end
 
-  def header_start
-    @keyword.start
+  def bounds
+    @keyword.start..@lua.end
   end
 
-  def header_end
-    @params.last?.try &.end || @keyword.end
+  def header_start
+    @keyword.start
   end
 
   def index
@@ -641,7 +660,7 @@ class HeartbeatRule < KeywordRule
   end
 
   def signature
-    HeartbeatRuleSignature.new(@period)
+    HeartbeatRuleSignature.new(@period.try &.total_milliseconds.to_i || -1)
   end
 
   @corrupt = false
@@ -724,6 +743,12 @@ class Protocol
     @birth = BirthRule.new(Excerpt.new("", 0))
   end
 
+  def each_birth_rule
+    if birth = @birth
+      yield birth
+    end
+  end
+
   def each_keyword_rule
     @rules.each_value do |kwrule|
       yield kwrule
@@ -731,14 +756,13 @@ class Protocol
   end
 
   def each_heartbeat_rule
-    # TODO: use a separate array of HeartbeatRules
     @rules.each_value do |rule|
       yield rule if rule.is_a?(HeartbeatRule)
     end
   end
 
   def update(for cell : Cell, newer : KeywordRule)
-    if prev = @rules[newer.signature]?
+    if prev = fetch?(newer.signature)
       @rules[newer.signature] = prev.update(cell, newer)
     else
       @rules[newer.signature] = newer
@@ -749,17 +773,23 @@ class Protocol
     @birth = @birth.update(cell, newer)
   end
 
-  def fetch_rule?(signature : RuleSignature)
+  def fetch?(signature : RuleSignature)
     @rules[signature]?
   end
 
-  def sync(signatures : Set(RuleSignature))
-    # Delete those decls that are not in the keys array.
-    @rules = @rules.reject { |key, _| !key.in?(signatures) }
+  def rewrite(signatures : Set(RuleSignature))
+    new_rules = {} of RuleSignature => KeywordRule
+
+    # Get rid of those decls that are not in the signatures set.
+    signatures.each do |signature|
+      new_rules[signature] = @rules[signature]
+    end
+
+    @rules = new_rules
   end
 
   def answer(receiver : Cell, vesicle : Vesicle)
-    return unless rule = fetch_rule?(KeywordRuleSignature.new(vesicle.keyword, vesicle.nargs))
+    return unless rule = fetch?(KeywordRuleSignature.new(vesicle.keyword, vesicle.nargs))
 
     # Attack is a heading pointing hdg the vesicle.
     delta = (vesicle.mid - receiver.mid)
@@ -1172,7 +1202,7 @@ class ProtocolEditor
     signatures = Set(RuleSignature).new
     if results.empty?
       self.sync = true
-      protocol.sync(signatures)
+      protocol.rewrite(signatures)
       return
     end
 
@@ -1192,7 +1222,7 @@ class ProtocolEditor
 
     self.sync = !error
     unless error
-      protocol.sync(signatures)
+      protocol.rewrite(signatures)
     end
   end
 
@@ -1204,10 +1234,7 @@ class ProtocolEditor
   def draw(target, states)
     @origin = origin = @cell.mid + @cell.class.radius * 1.1
 
-    texture = FONT.get_texture(13)
-    texture.smooth = false
-
-    text = SF::Text.new(buffer.string, FONT, 13)
+    text = SF::Text.new(source, FONT, 11)
     text.line_spacing = 1.3
 
     text_width = text.global_bounds.width + text.local_bounds.left
@@ -1278,8 +1305,8 @@ class ProtocolEditor
       b_pos = text.find_character_pos(b)
 
       h_bg = SF::RectangleShape.new
-      h_bg.position = SF.vector2f(bg_rect.position.x, b_pos.y)
-      h_bg.size = SF.vector2f(bg_rect.size.x, text.character_size * text.line_spacing)
+      h_bg.position = SF.vector2f(bg_rect.position.x, b_pos.y + text.character_size * (text.line_spacing - 1)/2)
+      h_bg.size = SF.vector2f(bg_rect.size.x, text.character_size)
       h_bg.fill_color = rule_header_bg
 
       h_sep_top = SF::RectangleShape.new
@@ -1303,14 +1330,14 @@ class ProtocolEditor
     # Draw beam.
     #
     beam = SF::RectangleShape.new
-    beam.fill_color = SF::Color.new(0xAE, 0xD5, 0x81)
+    beam.fill_color = SF::Color.new(0x9E, 0x9E, 0x9E)
 
     # If there is no source, beam is 1 pixel wide.
     cur = text.find_character_pos(cursor)
     nxt = text.find_character_pos(cursor + 1)
 
-    beam.position = cur + SF.vector2f(1, text.character_size * (text.line_spacing - 1)/2)
-    beam.size = SF.vector2f(Math.max(6, nxt.x - cur.x), text.character_size)
+    beam.position = cur + SF.vector2f(0, text.character_size * (text.line_spacing - 1)/2)
+    beam.size = SF.vector2f(Math.max(4, nxt.x - cur.x), text.character_size)
     beam.draw(target, states)
 
     #
@@ -1341,9 +1368,9 @@ class ProtocolEditor
       bg_l = 70
       fg_l = 40
 
-      mtext = SF::Text.new(marker.message, FONT, 13)
+      mtext = SF::Text.new(marker.message, FONT, 11)
 
-      mbg_rect_position = coords + (flip ? SF.vector2f(-6, -(text.character_size * text.line_spacing) - 0.6) : SF.vector2f(-3, 4.5))
+      mbg_rect_position = coords + (flip ? SF.vector2f(-6, -(text.character_size * text.line_spacing) - 0.2) : SF.vector2f(-3, 4.5))
       mbg_rect_size = SF.vector2f(
         mtext.global_bounds.width + mtext.local_bounds.left + 10,
         mtext.global_bounds.height + mtext.local_bounds.top + 4
@@ -1386,7 +1413,7 @@ class ProtocolEditor
       # Draw marker text.
       #
       mtext.fill_color = SF::Color.new(*LCH.lch2rgb(fg_l, c, h))
-      mtext.position = mbg_rect.position + SF.vector2f(5, 2)
+      mtext.position = Vector2.new(mbg_rect.position + SF.vector2f(5, 2)).sfi
       mtext.draw(target, states)
     end
   end
@@ -1763,7 +1790,7 @@ class Actor
   include SF::Drawable
 
   def initialize
-    @text = SF::Text.new("", FONT, 13)
+    @text = SF::Text.new("", FONT, 11)
     @text.fill_color = SF::Color::Black
   end
 
@@ -2124,9 +2151,12 @@ class Mode::Normal < Mode
     @ondrop
   end
 
+  @mouse = Vector2.new(0, 0)
+
   def map(app, event : SF::Event::MouseMoved)
+    @mouse = app.coords(event)
     @elevated.try do |cell|
-      cell.mid = app.coords(event)
+      cell.mid = @mouse
     end
 
     self
@@ -2136,6 +2166,17 @@ class Mode::Normal < Mode
     app.pan(0.at(-event.delta * 10))
 
     self
+  end
+
+  def map(app, event : SF::Event::TextEntered)
+    return super unless app.tank.inspecting?(nil)
+    return super if app.tank.find_cell_at?(@mouse)
+    return super unless (chr = event.unicode.chr).alphanumeric?
+
+    cell = app.tank.cell to: @mouse
+    app.tank.inspect(cell)
+
+    super
   end
 
   def map(app, event : SF::Event::KeyPressed)
@@ -2149,6 +2190,10 @@ class Mode::Normal < Mode
     when .delete?, .backspace?
       if app.tank.inspecting?(nil)
         return Mode::Slaying.new
+      end
+    when .space? # ANCHOR: Space :: toggle time
+      if app.tank.inspecting?(nil)
+        app.toggle_time
       end
     end
     super
@@ -2419,6 +2464,12 @@ class App
     @editor.view = view
   end
 
+  @time = true
+
+  def toggle_time
+    @time = !@time
+  end
+
   def run
     while @editor.open?
       while event = @editor.poll_event
@@ -2454,7 +2505,7 @@ class App
 
       @tt.tick
 
-      @tank.tick(1/60)
+      @tank.tick(1/60) if @time
       @mode.tick(self)
 
       @editor.clear(SF::Color.new(0x21, 0x21, 0x21))
@@ -2503,6 +2554,9 @@ end
 # [x] add timed heartbeat overload syntax, e.g `heartbeat 300ms | ...`, `heartbeat 10ms | ...`,
 #     while simply `heartbeat |` will run on every frame
 # [x] fix bug: when a single cell±editor doesnt fit into screen (eg zoom) screen tearing occurs!!
+# [x] toggle time with spacebar
+# [x] when typing alphanumeric with nothing inspected, create a cell
+# [ ] make message name italic (aka basic syntax highlighting)
 # [ ] animate what's in brackets `heartbeat [300ms] |` based on progress of
 #     the associated task (very tiny bit of dimmer/lighter; do not steal attention!)
 # [ ] In Mode#draw(), draw hint panel which says what mode it is and how to
@@ -2513,10 +2567,11 @@ end
 #       represented by two circles "regions" at both ends connected by a 1px line
 # [ ] scroll left/right/up/down when inspected protocoleditor cursor is out of view
 # [ ] add selection rectangle (c-shift mode) to drag/copy/clone/delete multiple cells
-# [ ] text zoom not pixelation!!! use normal TTF an try to have dynamic text size
 # [ ] add drawableallocator to reuse shapes instead of reallocating them
 #     on every frame in draw(...); attach DA to App, pass to draw()s
 #     inside DA.frame { ... } in mainloop
+# [ ] introduce clock authority which will control clocks for heartbeats &
+#     timetables, and make the clocks react to toggle time
 # [ ] refactor, simplify, remove useless method dancing? use smaller
 #     objects, object-ize everything, get rid of getters and properties
 #     in Cell, e.g. refactor all methods that use (*, in tank : Tank) to a
