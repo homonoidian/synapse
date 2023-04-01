@@ -19,6 +19,8 @@ FONT        = SF::Font.from_memory({{read_file("./scientifica.otb")}}.to_slice)
 FONT_BOLD   = SF::Font.from_memory({{read_file("./scientificaBold.otb")}}.to_slice)
 FONT_ITALIC = SF::Font.from_memory({{read_file("./scientificaItalic.otb")}}.to_slice)
 
+FONT_UI = SF::Font.from_memory({{read_file("OpenSans-VariableFont_wdth,wght.ttf")}}.to_slice)
+
 FONT.get_texture(11).smooth = false
 FONT_BOLD.get_texture(11).smooth = false
 FONT_ITALIC.get_texture(11).smooth = false
@@ -2093,7 +2095,53 @@ abstract class Mode
     self
   end
 
+  # Holds the title and description of a mode.
+  record ModeHint, title : String, desc : String
+
+  # Returns the title and description of a mode.
+  abstract def hint : ModeHint
+
   def draw(target, states)
+    gap_y = 8
+    padding = 5
+
+    title = SF::Text.new(hint.title, FONT_UI, 16)
+    title.position = SF.vector2f(padding, padding)
+    title.style = SF::Text::Style::Bold
+    title.color = SF::Color.new(0x3c, 0x30, 0x00)
+
+    title_width = title.global_bounds.width + title.local_bounds.left
+    title_height = title.global_bounds.height + title.local_bounds.top
+
+    desc = SF::Text.new(hint.desc, FONT_UI, 11)
+    desc.position = SF.vector2i(padding, title_height.to_i + gap_y + padding)
+    desc.color = SF::Color.new(0x56, 0x46, 0x00)
+
+    desc_width = desc.global_bounds.width + desc.local_bounds.left
+    desc_height = desc.global_bounds.height + desc.local_bounds.top
+
+    bg = SF::RectangleShape.new
+    bg.size = SF.vector2f(
+      Math.max(title_width, desc_width) + padding * 2,
+      title_height + desc_height + gap_y + padding * 2
+    )
+    bg.fill_color = SF::Color.new(0xFF, 0xE0, 0x82)
+
+    bounds = SF.float_rect(0, 0, target.size.x, target.size.y)
+
+    # Do not draw if window is smaller than 1.5 * hint widths /
+    # 3 * hint heights (height is more expensive)
+    return unless bounds.contains?(bg.size * SF.vector2f(1.5, 3))
+
+    offset = SF.vector2f(bounds.width - bg.size.x - 10, 10)
+
+    bg.position += offset
+    title.position += offset
+    desc.position += offset
+
+    bg.draw(target, states)
+    title.draw(target, states)
+    desc.draw(target, states)
   end
 
   def tick(app)
@@ -2104,6 +2152,19 @@ MOUSE_ID = UUID.random
 
 class Mode::Normal < Mode
   def initialize(@elevated : Cell? = nil, @ondrop : Mode = self)
+  end
+
+  def hint : ModeHint
+    ModeHint.new(
+      title: "Normal mode",
+      desc: <<-END
+      Double click or start typing over empty space to add new
+      cells and inspect them simultaneously. Move cells around
+      by dragging them. Click on a cell to inspect it. Hit Esc to
+      uninspect; then press Delete/Backspace to go into slaying
+      mode.
+      END
+    )
   end
 
   def tick(app)
@@ -2191,9 +2252,9 @@ class Mode::Normal < Mode
   def map(app, event : SF::Event::KeyPressed)
     case event.code
     when .l_control?, .r_control?
-      return Mode::AwaitingPan.new
+      return Mode::Ctrl.new
     when .l_shift?, .r_shift?
-      return Mode::Wiring.new(WireConfig.new)
+      return Mode::Shift.new(WireConfig.new)
     when .escape?
       app.tank.inspect(nil)
     when .delete?, .backspace?
@@ -2210,6 +2271,16 @@ class Mode::Normal < Mode
 end
 
 class Mode::Slaying < Mode
+  def hint : ModeHint
+    ModeHint.new(
+      title: "Slaying mode",
+      desc: <<-END
+      Click on any cell to slay it. Hit Escape, Delete, or
+      Backspace to quit.
+      END
+    )
+  end
+
   def cursor(app : App)
     SF::Cursor.from_system(SF::Cursor::Type::Cross)
   end
@@ -2258,7 +2329,7 @@ end
 
 record WireConfig, from : Cell? = nil, to : Vector2? = nil
 
-class Mode::Wiring < Mode::Normal
+class Mode::Shift < Mode::Normal
   @mouse : Vector2
 
   def initialize(@wire : WireConfig)
@@ -2267,11 +2338,20 @@ class Mode::Wiring < Mode::Normal
     @mouse = 0.at(0)
   end
 
+  def hint : ModeHint
+    ModeHint.new(
+      title: "Shift-mode",
+      desc: <<-END
+      Click on a cell/empty space to create a wire from/to
+      where you clicked. Use mouse wheel to scroll horizontally.
+      END
+    )
+  end
+
   def submit(app : App, src : Cell, dst : Vector2)
     app.tank.wire(from: src, to: dst)
   end
 
-  # TODO: less hard coded: Wiring may not have been On-Shift
   def map(app, event : SF::Event::MouseWheelScrolled)
     app.pan((-event.delta * 10).at(0))
 
@@ -2324,22 +2404,34 @@ class Mode::Wiring < Mode::Normal
   end
 
   def draw(target, states)
+    super
+
     return unless @wire.from || @wire.to
 
-    src = @wire.from.try &.mid || @mouse
-    dst = @wire.to || @mouse
+    text = SF::Text.new("Please finish the wire by clicking somewhere...", FONT_UI, 18)
+    text.fill_color = SF::Color.new(0x88, 0x88, 0x88)
+    text_size = SF.vector2f(
+      text.global_bounds.width + text.local_bounds.left,
+      text.global_bounds.height + text.local_bounds.top,
+    )
 
-    wire_color = @wire.from.try &.halo_color || SF::Color.new(0xBD, 0xBD, 0xBD)
-
-    va = SF::VertexArray.new(SF::Lines)
-    va.append(SF::Vertex.new(src.sf, wire_color))
-    va.append(SF::Vertex.new(dst.sf, wire_color))
-
-    va.draw(target, states)
+    text.position = Vector2.new(target.view.center - text_size/2).sfi
+    text.draw(target, states)
   end
 end
 
-class Mode::AwaitingPan < Mode
+class Mode::Ctrl < Mode
+  def hint : ModeHint
+    ModeHint.new(
+      title: "Ctrl-Mode",
+      desc: <<-END
+      Drag to pan around. Use mouse wheel to zoom. Click the
+      middle mouse button to reset zoom. In Ctrl-Mode, the code
+      editor cursor step is set to words.
+      END
+    )
+  end
+
   def map(app, event : SF::Event::KeyReleased)
     return super unless event.code.l_control?
 
@@ -2374,14 +2466,23 @@ class Mode::AwaitingPan < Mode
   end
 end
 
-class Mode::Panning < Mode::AwaitingPan
+class Mode::Panning < Mode::Ctrl
   def initialize(@origin : Vector2)
+  end
+
+  def hint : ModeHint
+    ModeHint.new(
+      title: "Pan mode",
+      desc: <<-END
+      Release the left mouse button when you've finished panning.
+      END
+    )
   end
 
   def map(app, event : SF::Event::MouseButtonReleased)
     return super unless event.button.left?
 
-    Mode::AwaitingPan.new
+    Mode::Ctrl.new
   end
 
   def map(app, event : SF::Event::MouseMoved)
@@ -2392,6 +2493,8 @@ class Mode::Panning < Mode::AwaitingPan
 end
 
 class App
+  include SF::Drawable
+
   getter tank : Tank
 
   @mode : Mode
@@ -2405,19 +2508,45 @@ class App
   end
 
   def initialize
-    @editor = SF::RenderWindow.new(SF::VideoMode.new(1280, 720), title: "Synapse — Editor",
+    @editor = SF::RenderTexture.new(1280, 720, settings: SF::ContextSettings.new(depth: 24, antialiasing: 8))
+    @hud = SF::RenderTexture.new(1280, 720, settings: SF::ContextSettings.new(depth: 24, antialiasing: 8))
+
+    @editor_window = SF::RenderWindow.new(SF::VideoMode.new(1280, 720), title: "Synapse — Editor",
       settings: SF::ContextSettings.new(depth: 24, antialiasing: 8)
     )
-    @editor.framerate_limit = 60
-    @scene = SF::RenderWindow.new(SF::VideoMode.new(640, 480), title: "Synapse — Scene",
+    @editor_window.framerate_limit = 60
+    @editor_size = @editor_window.size
+
+    @scene_window = SF::RenderWindow.new(SF::VideoMode.new(640, 480), title: "Synapse — Scene",
       settings: SF::ContextSettings.new(depth: 24, antialiasing: 8)
     )
 
-    @scene.framerate_limit = 60
+    @scene_window.framerate_limit = 60
 
     @tank = Tank.new
     @tt = TimeTable.new
     @tt.every(10.seconds) { GC.collect }
+
+    # FIXME: for some reason both of these create()s leak a
+    # huge lot of memory when editor window is resized.
+    #
+    # Doing this "resize check" every 2 seconds rather than
+    # on every resize amortizes this a little bit, but just a
+    # little bit: there is still a huge memory leak if you
+    # resize the window "too much".
+    @tt.every(2.seconds) do
+      unless @editor_window.size == @editor_size
+        @editor_size = @editor_window.size
+
+        @editor.create(@editor_size.x, @editor_size.y,
+          settings: SF::ContextSettings.new(depth: 24, antialiasing: 8)
+        )
+
+        @hud.create(@editor_size.x, @editor_size.y,
+          settings: SF::ContextSettings.new(depth: 24, antialiasing: 8)
+        )
+      end
+    end
 
     @tank.vein(to: 0.at(0))
     @tank.insert(Actor.new)
@@ -2431,7 +2560,7 @@ class App
   end
 
   def editor_cursor=(other : SF::Cursor)
-    @editor.mouse_cursor = other
+    @editor_window.mouse_cursor = other
   end
 
   def coords(event)
@@ -2440,7 +2569,7 @@ class App
   end
 
   def prn(chars : String)
-    @scene_buffer.string += chars
+    @scene_window_buffer.string += chars
   end
 
   def pan(delta : Vector2)
@@ -2479,29 +2608,64 @@ class App
     @time = !@time
   end
 
+  def draw(target, states)
+    #
+    # Draw tank.
+    #
+    @editor.clear(SF::Color.new(0x21, 0x21, 0x21, 0xff))
+    @tank.draw(:entities, @editor)
+    @tank.draw(:actors, @scene_window)
+    @editor.display
+
+    #
+    # Draw hud (mode).
+    #
+    @hud.clear(SF::Color.new(0x21, 0x21, 0x21, 0))
+    @hud.draw(@mode)
+    @hud.display
+
+    # dst.rgb = src_alpha * src.rgb + (1 - src_alpha) * dst.rgb
+    # dst.a = 1 * src.a + (1 - src_alpha) * dst.a
+
+    #
+    # Draw sprites for both.
+    #
+    target.draw SF::Sprite.new(@editor.texture)
+    target.draw SF::Sprite.new(@hud.texture), SF::RenderStates.new(SF::BlendMode.new(SF::BlendMode::SrcAlpha, SF::BlendMode::OneMinusSrcAlpha))
+  end
+
   def run
-    while @editor.open?
-      while event = @editor.poll_event
+    while @editor_window.open?
+      while event = @editor_window.poll_event
         case event
         when SF::Event::Closed
-          @editor.close
-          @scene.close
+          @editor_window.close
+          @scene_window.close
         when SF::Event::Resized
           view = @editor.view
           view.size = SF.vector2f(event.width, event.height)
-          view.center = SF.vector2f(@editor.view.center.x.round, @editor.view.center.y.round)
+          view.center = SF.vector2f(view.center.x.round, view.center.y.round)
           view.zoom(@factor)
           @editor.view = view
+
+          view = @hud.view
+          view.size = SF.vector2f(event.width, event.height)
+          @hud.view = view
+
+          win_view = @editor_window.view
+          win_view.size = SF.vector2f(event.width, event.height)
+          win_view.center = win_view.size/2
+          @editor_window.view = win_view
         else
           self.mode = @mode.map(self, event)
         end
       end
 
-      while event = @scene.poll_event
+      while event = @scene_window.poll_event
         case event
         when SF::Event::Closed
-          @scene.close
-          @editor.close
+          @scene_window.close
+          @editor_window.close
         when SF::Event::KeyPressed
           @tank.each_vein &.emit("key", [event.code.to_s] of Memorable, color: Cell.color(l: 80, c: 70))
         when SF::Event::TextEntered
@@ -2517,14 +2681,13 @@ class App
       @tank.tick(1/60) if @time
       @mode.tick(self)
 
-      @editor.clear(SF::Color.new(0x21, 0x21, 0x21))
-      @scene.clear(SF::Color::White)
-      @tank.draw(:entities, @editor)
-      @tank.draw(:actors, @scene)
-      @editor.draw(@mode)
+      @editor_window.clear(SF::Color.new(0x21, 0x21, 0x21))
+      @scene_window.clear(SF::Color::White)
 
-      @scene.display
-      @editor.display
+      @editor_window.draw(self)
+
+      @scene_window.display
+      @editor_window.display
     end
   end
 end
@@ -2554,6 +2717,7 @@ end
 #
 # [x] make message header underline more dimmer (redesign message header highlight)
 # [x] autocenter view on cell when in inspect mode
+# [x] scroll left/right/up/down when inspected protocoleditor cursor is out of view
 # [x] halo relative cells when any cell is inspected
 # [x] draw wires under cells
 # [x] change color of wires to match cell color (exactly the same as halo!)
@@ -2566,16 +2730,14 @@ end
 # [x] toggle time with spacebar
 # [x] when typing alphanumeric with nothing inspected, create a cell
 # [x] implement ctrl-c/ctrl-v of buffer contents
+# [x] In Mode#draw(), draw hint panel which says what mode it is and how to
+#     use it; draw into a separate RenderTexture for no zoom on it
 # [ ] make message name italic (aka basic syntax highlighting)
 # [ ] animate what's in brackets `heartbeat [300ms] |` based on progress of
 #     the associated task (very tiny bit of dimmer/lighter; do not steal attention!)
-# [ ] In Mode#draw(), draw hint panel which says what mode it is and how to
-#     use it; draw into a separate RenderTexture for no zoom on it; hide panel
-#     after some time using TimeTable and Mode#tick
 # [ ] support clone using C-Middrag
 # [ ] wormhole wire -- listen at both ends, teleport to the opposite end
 #       represented by two circles "regions" at both ends connected by a 1px line
-# [ ] scroll left/right/up/down when inspected protocoleditor cursor is out of view
 # [ ] add selection rectangle (c-shift mode) to drag/copy/clone/delete multiple cells
 # [ ] add drawableallocator to reuse shapes instead of reallocating them
 #     on every frame in draw(...); attach DA to App, pass to draw()s
