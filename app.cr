@@ -2509,7 +2509,9 @@ class App
 
   def initialize
     @editor = SF::RenderTexture.new(1280, 720, settings: SF::ContextSettings.new(depth: 24, antialiasing: 8))
+    @editor.smooth = false
     @hud = SF::RenderTexture.new(1280, 720, settings: SF::ContextSettings.new(depth: 24, antialiasing: 8))
+    @hud.smooth = false
 
     @editor_window = SF::RenderWindow.new(SF::VideoMode.new(1280, 720), title: "Synapse — Editor",
       settings: SF::ContextSettings.new(depth: 24, antialiasing: 8)
