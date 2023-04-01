@@ -1,0 +1,18 @@
+-- Magnet
+self.hdg = 0
+self.speed = 0
+self.minSpeed = 50
+self.maxSpeed = 100
+
+ping |
+  if not (sender == id) then
+    self.hdg = attack
+    self.speed = decay * self.maxSpeed + self.minSpeed
+  end
+
+heartbeat |
+  swim(self.hdg, self.speed)
+  send("ping")
+  if self.speed > self.minSpeed then
+    self.speed = self.speed - 10
+  end

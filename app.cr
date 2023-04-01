@@ -1155,6 +1155,16 @@ class ProtocolEditor
         dest = buffer.fetch_line(line.ord + 1)
         self.cursor = dest.b + Math.min(cursor - line.b, dest.size)
       end
+    when .c?
+      return unless event.control
+
+      SF::Clipboard.string = source
+    when .v?
+      return unless event.control
+
+      update { SF::Clipboard.string }
+
+      self.cursor = buffer.size - 1
     end
   end
 
@@ -1235,6 +1245,7 @@ class ProtocolEditor
     @origin = origin = @cell.mid + @cell.class.radius * 1.1
 
     text = SF::Text.new(source, FONT, 11)
+    text.position = (origin + 15.at(15)).sfi
     text.line_spacing = 1.3
 
     text_width = text.global_bounds.width + text.local_bounds.left
@@ -1283,8 +1294,6 @@ class ProtocolEditor
     bar.position = origin.sfi
     bar.size = SF.vector2f(4, text_height + 30)
     bar.draw(target, states)
-
-    text.position = (origin + 15.at(15)).sfi
 
     #
     # Underline every keyword rule. Keyword index and parameter
@@ -2556,6 +2565,7 @@ end
 # [x] fix bug: when a single cell±editor doesnt fit into screen (eg zoom) screen tearing occurs!!
 # [x] toggle time with spacebar
 # [x] when typing alphanumeric with nothing inspected, create a cell
+# [x] implement ctrl-c/ctrl-v of buffer contents
 # [ ] make message name italic (aka basic syntax highlighting)
 # [ ] animate what's in brackets `heartbeat [300ms] |` based on progress of
 #     the associated task (very tiny bit of dimmer/lighter; do not steal attention!)
