@@ -289,7 +289,7 @@ record ErrResult < EvalResult, error : Lua::LuaError | ArgumentError, rule : Rul
 end
 
 class ResponseContext
-  def initialize(@rule : KeywordRule, @receiver : Cell)
+  def initialize(@receiver : Cell)
     @strength = 120.0
   end
 
@@ -470,6 +470,16 @@ class ResponseContext
     1
   end
 
+  # Prints to editor console.
+  def print(state : LibLua::State)
+    stack = Lua::Stack.new(state, :all)
+    string = (1..stack.size).join('\t') { |index| stack[index] || "nil" }
+
+    Console::INSTANCE.print string
+
+    1
+  end
+
   # Populates *stack* with globals related to this response context.
   def fill(stack : Lua::Stack)
     stack.set_global("self", @receiver.memory)
@@ -478,12 +488,13 @@ class ResponseContext
     stack.set_global("strength", ->strength(LibLua::State))
     stack.set_global("send", ->send(LibLua::State))
     stack.set_global("swim", ->swim(LibLua::State))
+    stack.set_global("print", ->print(LibLua::State))
   end
 end
 
 class MessageResponseContext < ResponseContext
-  def initialize(rule : KeywordRule, receiver : Cell, @message : Message, @attack = 0.0)
-    super(rule, receiver)
+  def initialize(receiver : Cell, @message : Message, @attack = 0.0)
+    super(receiver)
   end
 
   def fill(stack : Lua::Stack)
@@ -564,7 +575,9 @@ class BirthRule < Rule
 
   def result(receiver : Cell) : EvalResult
     stack = Lua::Stack.new
-    stack.set_global("self", receiver.memory)
+
+    res = ResponseContext.new(receiver)
+    res.fill(stack)
 
     begin
       stack.run(@lua.string, "birth")
@@ -612,7 +625,7 @@ class KeywordRule < Rule
   def result(receiver : Cell, message : Message, attack = 0.0) : EvalResult
     stack = Lua::Stack.new
 
-    res = MessageResponseContext.new(self, receiver, message, attack)
+    res = MessageResponseContext.new(receiver, message, attack)
     res.fill(stack)
 
     @params.zip(message.args) do |param, arg|
@@ -707,7 +720,7 @@ class HeartbeatRule < KeywordRule
       stack = Lua::Stack.new
 
       # TODO: heartbeatresponsecontext, mainly to change period dynamically
-      res = ResponseContext.new(self, receiver)
+      res = ResponseContext.new(receiver)
       res.fill(stack)
 
       begin
@@ -2088,6 +2101,15 @@ abstract class Mode
     app.editor_cursor = app.default_cursor
   end
 
+  @mouse = Vector2.new(0, 0)
+  @mouse_in_tank = Vector2.new(0, 0)
+
+  def map(app, event : SF::Event::MouseMoved)
+    @mouse = event.x.at(event.y)
+    @mouse_in_tank = app.coords(event)
+    self
+  end
+
   # Maps *event* to the next mode.
   def map(app, event)
     app.tank.handle(event)
@@ -2190,8 +2212,16 @@ class Mode::Normal < Mode
       @clicks = 1
     end
 
+    @mouse = event.x.at(event.y)
+    @mouse_in_tank = coords
+
     cc = @clickclock ||= SF::Clock.new
     cc.restart
+
+    if @mouse.in?(app.console) || app.console.elevated?
+      app.console.handle(event, clicks: @clicks)
+      return self
+    end
 
     case event.button
     when .left?
@@ -2203,7 +2233,7 @@ class Mode::Normal < Mode
       when 1
         # Inspect & elevate cell/void
       else
-        return self
+        return super
       end
       @elevated = cell
       app.tank.inspect(cell)
@@ -2221,24 +2251,38 @@ class Mode::Normal < Mode
   end
 
   def map(app, event : SF::Event::MouseButtonReleased)
+    if @elevated.nil? && (@mouse.in?(app.console) || app.console.elevated?)
+      app.console.handle(event)
+      return self
+    end
+
     @elevated.try &.stop
     @elevated = nil
 
     @ondrop
   end
 
-  @mouse = Vector2.new(0, 0)
-
   def map(app, event : SF::Event::MouseMoved)
-    @mouse = app.coords(event)
+    super
+
+    if @elevated.nil? && (@mouse.in?(app.console) || app.console.elevated?)
+      app.console.handle(event)
+      return self
+    end
+
     @elevated.try do |cell|
-      cell.mid = @mouse
+      cell.mid = @mouse_in_tank
     end
 
     self
   end
 
   def map(app, event : SF::Event::MouseWheelScrolled)
+    if @mouse.in?(app.console) || app.console.elevated?
+      app.console.handle(event)
+      return self
+    end
+
     app.pan(0.at(-event.delta * 10))
 
     self
@@ -2246,10 +2290,10 @@ class Mode::Normal < Mode
 
   def map(app, event : SF::Event::TextEntered)
     return super unless app.tank.inspecting?(nil)
-    return super if app.tank.find_cell_at?(@mouse)
+    return super if app.tank.find_cell_at?(@mouse_in_tank)
     return super unless (chr = event.unicode.chr).alphanumeric?
 
-    cell = app.tank.cell to: @mouse
+    cell = app.tank.cell to: @mouse_in_tank
     app.tank.inspect(cell)
 
     super
@@ -2296,7 +2340,7 @@ class Mode::Slaying < Mode
   @pressed_on : Cell?
 
   def map(app, event : SF::Event::MouseButtonPressed)
-    return self unless event.button.left?
+    return super unless event.button.left?
 
     coords = app.coords(event)
 
@@ -2336,12 +2380,8 @@ end
 record WireConfig, from : Cell? = nil, to : Vector2? = nil
 
 class Mode::Shift < Mode::Normal
-  @mouse : Vector2
-
   def initialize(@wire : WireConfig)
     super()
-
-    @mouse = 0.at(0)
   end
 
   def hint : ModeHint
@@ -2391,12 +2431,6 @@ class Mode::Shift < Mode::Normal
     self
   end
 
-  def map(app, event : SF::Event::MouseMoved)
-    @mouse = app.coords(event)
-
-    self
-  end
-
   def map(app, event : SF::Event::KeyReleased)
     case event.code
     when .l_shift?, .r_shift?
@@ -2415,7 +2449,7 @@ class Mode::Shift < Mode::Normal
     return unless @wire.from || @wire.to
 
     text = SF::Text.new("Please finish the wire by clicking somewhere...", FONT_UI, 18)
-    text.fill_color = SF::Color.new(0x88, 0x88, 0x88)
+    text.fill_color = SF::Color.new(0x99, 0x99, 0x99)
     text_size = SF.vector2f(
       text.global_bounds.width + text.local_bounds.left,
       text.global_bounds.height + text.local_bounds.top,
@@ -2491,9 +2525,164 @@ class Mode::Panning < Mode::Ctrl
   end
 
   def map(app, event : SF::Event::MouseMoved)
+    super
+
     app.pan(@origin - app.coords(event))
 
     self
+  end
+end
+
+class Console
+  include SF::Drawable
+
+  # TODO: make console NOT a singleton. Currently it's very
+  # hard to access console otherwise from ResponseContext,
+  # make that easier e.g. via a Stream?
+  INSTANCE = new(rows: 24, cols: 80)
+
+  @col : Float32
+
+  def initialize(@rows : Int32, @cols : Int32)
+    @buffer = [] of String
+
+    @text = SF::Text.new("", FONT, 11)
+    @text.fill_color = SF::Color::White
+
+    @col = FONT.get_glyph(' '.ord, @text.character_size, false).advance
+    @row = @text.character_size * @text.line_spacing
+
+    @bg = SF::RectangleShape.new
+    @bg.size = SF.vector2f(@col * @cols + 4, @row * @rows + 4)
+    @bg.fill_color = SF::Color.new(0x11, 0x11, 0x11)
+
+    # Create a rectangle for the header
+    @header = SF::RectangleShape.new
+    @header.size = @bg.size + SF.vector2f(2, header_height + 1)
+    @header.fill_color = SF::Color.new(0x54, 0x80, 0x95)
+
+    # Create title text
+    @title = SF::Text.new("** Console ** Double click to fold/unfold", FONT_BOLD, 11)
+
+    l, c, h = LCH.rgb2lch(0x54, 0x80, 0x95)
+
+    # @title.fill_color = p SF::Color.new(*LCH.lch2rgb(30, c, h))
+    @title.fill_color = SF::Color.new(28, 76, 95)
+
+    @scrolly = 0
+    @folded = false
+    @folded_manually = false
+  end
+
+  def header_height
+    @row + 3
+  end
+
+  def includes?(other : Vector2)
+    @header.global_bounds.contains?(other.sf)
+  end
+
+  def move(v2)
+    @header.position += v2
+  end
+
+  def move(x, y)
+    move(SF.vector2f(x, y))
+  end
+
+  getter? elevated = false
+  @pressed_at = SF.vector2f(0, 0)
+
+  def handle(event : SF::Event::MouseWheelScrolled)
+    @scrolly = (@scrolly + event.delta.to_i).clamp(0..Math.max(0, @buffer.size - @rows))
+  end
+
+  def handle(event : SF::Event::MouseButtonPressed, clicks : Int32)
+    if clicks == 2
+      self.folded = !@folded
+      @folded_manually = true
+    else
+      @elevated = true
+      @pressed_at = SF.vector2f(event.x, event.y)
+    end
+  end
+
+  def handle(event : SF::Event::MouseButtonReleased)
+    @elevated = false
+  end
+
+  def handle(event : SF::Event::MouseMoved)
+    return unless @elevated
+    move(SF.vector2f(event.x, event.y) - @pressed_at)
+
+    @pressed_at = SF.vector2f(event.x, event.y)
+  end
+
+  def handle(event)
+  end
+
+  SCROLLBACK = 1024
+
+  def print(string : String)
+    unless @folded_manually
+      self.folded = false
+    end
+
+    lines = [] of String
+
+    string.split('\n') do |line|
+      if line.size > @cols
+        lines << line[...@cols]
+        lines << line[@cols..]
+      else
+        lines << line
+      end
+    end
+
+    if @buffer.size + lines.size > SCROLLBACK
+      @buffer.shift(lines.size)
+    end
+
+    @buffer.concat(lines)
+  end
+
+  def folded=(@folded)
+    if folded
+      @header.size = SF.vector2f(@header.size.x, header_height)
+    else
+      @header.size = @bg.size + SF.vector2f(2, header_height + 1)
+    end
+  end
+
+  def draw(target : SF::RenderTarget, states : SF::RenderStates)
+    @header.draw(target, states)
+
+    title_width = @title.global_bounds.width + @title.local_bounds.left
+    title_height = @title.global_bounds.height + @title.local_bounds.top
+
+    @title.position = Vector2.new(
+      @header.position + SF.vector2f((@header.size.x - title_width)/2, (header_height - title_height)/2)
+    ).sfi
+
+    @title.draw(target, states)
+
+    return if @folded
+
+    # Shift bg and text header to go "inside" header
+    @bg.position = @header.position + SF.vector2f(1, header_height)
+    start = Math.max(0, @buffer.size - @rows - @scrolly)
+    visible = @buffer[start, Math.min(@rows, @buffer.size - start)]
+    @bg.draw(target, states)
+
+    visible.each_with_index do |line, index|
+      @text.string = line
+      @text.position = SF.vector2f(@bg.position.x + 2, @bg.position.y + @row * index + 2)
+      @text.draw(target, states)
+    end
+  end
+
+  def draw(app : App, target : SF::RenderTarget)
+    target.draw(self)
   end
 end
 
@@ -2501,6 +2690,7 @@ class App
   include SF::Drawable
 
   getter tank : Tank
+  getter console : Console
 
   @mode : Mode
 
@@ -2532,6 +2722,11 @@ class App
 
     @tank = Tank.new
     @tt = TimeTable.new
+
+    @console = Console::INSTANCE
+    @console.folded = true
+    @console.move(40, 20)
+
     @tt.every(10.seconds) { GC.collect }
 
     # FIXME: for some reason both of these create()s leak a
@@ -2628,7 +2823,40 @@ class App
     # Draw hud (mode).
     #
     @hud.clear(SF::Color.new(0x21, 0x21, 0x21, 0))
+
+    # Draw console window...
+    @console.draw(self, @hud)
+
+    # Draw whatever mode wants to draw...
     @mode.draw(self, @hud)
+
+    # Optionally draw "time is paused" window
+    unless @time
+      text = SF::Text.new("Time is paused... Press Space to unpause", FONT_UI, 14)
+      text.fill_color = SF::Color.new(0x99, 0x99, 0x99)
+      text_size = SF.vector2f(
+        text.global_bounds.width + text.local_bounds.left,
+        text.global_bounds.height + text.local_bounds.top,
+      )
+
+      padding = SF.vector2f(10, 5)
+
+      bg_rect = SF::RectangleShape.new
+      bg_rect.fill_color = SF::Color.new(0x33, 0x33, 0x33)
+      bg_rect.size = text_size + padding*2
+      bg_rect.outline_thickness = 1
+      bg_rect.outline_color = SF::Color.new(0x55, 0x55, 0x55)
+
+      rect_x = target.view.center.x - bg_rect.size.x/2
+      rect_y = target.size.y - bg_rect.size.y * 2
+      bg_rect.position = SF.vector2f(rect_x, rect_y)
+
+      text.position = Vector2.new(bg_rect.position + padding).sfi
+
+      @hud.draw(bg_rect)
+      @hud.draw(text)
+    end
+
     @hud.display
 
     #
@@ -2737,11 +2965,15 @@ end
 # [x] In Mode#draw(), draw hint panel which says what mode it is and how to
 #     use it; draw into a separate RenderTexture for no zoom on it
 # [x] do not show hint panel when editor is active (aka when anything is being inspected)
-# [ ] add a console window to hud inside editor and redirect print() to that console
+# [x] add a console window to hud inside editor and redirect print() to that console
+# [x] print "paused" on hud when time is stopped
 # [ ] support clone using C-Middrag
 # [ ] wormhole wire -- listen at both ends, teleport to the opposite end
 #       represented by two circles "regions" at both ends connected by a 1px line
-# [ ] add selection rectangle (c-shift mode) to drag/copy/clone/delete multiple cells
+# [ ] refactor event+mode system to use smaller handlers & have better focus
+# [ ] add selection rectangle (c-shift mode) to drag/copy/clone/delete multiple entities
+#     selection rectangle :: to select new things
+#     selection :: contains new and previously selected things
 # [ ] add drawableallocator object pool to reuse shapes instead of reallocating
 #     them on every frame in draw(...); attach DA to App, pass to draw()s
 #     inside DA.frame { ... } in mainloop
