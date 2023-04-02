@@ -536,11 +536,16 @@ class HeartbeatRuleSignature < RuleSignature
   def initialize(@period : Int32?)
   end
 
-  def keyword
-    "heartbeat"
+  def_equals_and_hash period
+end
+
+class WildcardSignature < RuleSignature
+  getter arity
+
+  def initialize(@arity : Int32)
   end
 
-  def_equals_and_hash period
+  def_equals_and_hash arity
 end
 
 class BirthRule < Rule
@@ -619,7 +624,11 @@ class KeywordRule < Rule
   end
 
   def signature
-    KeywordRuleSignature.new(@keyword.string, @params.size)
+    if keyword.string == "*"
+      WildcardSignature.new(@params.size)
+    else
+      KeywordRuleSignature.new(@keyword.string, @params.size)
+    end
   end
 
   def result(receiver : Cell, message : Message, attack = 0.0) : EvalResult
@@ -777,11 +786,12 @@ class Protocol
   end
 
   def update(for cell : Cell, newer : KeywordRule)
-    if prev = fetch?(newer.signature)
+    fetch?(newer.signature) do |prev|
       @rules[newer.signature] = prev.update(cell, newer)
-    else
-      @rules[newer.signature] = newer
+      return
     end
+
+    @rules[newer.signature] = newer
   end
 
   def update(for cell : Cell, newer : BirthRule)
@@ -789,7 +799,12 @@ class Protocol
   end
 
   def fetch?(signature : RuleSignature)
-    @rules[signature]?
+    @rules[signature]?.try { |rule| yield rule }
+  end
+
+  def fetch?(signature : KeywordRuleSignature)
+    @rules[signature]?.try { |rule| yield rule }
+    @rules[WildcardSignature.new(signature.arity)]?.try { |rule| yield rule }
   end
 
   def rewrite(signatures : Set(RuleSignature))
@@ -804,13 +819,13 @@ class Protocol
   end
 
   def answer(receiver : Cell, vesicle : Vesicle)
-    return unless rule = fetch?(KeywordRuleSignature.new(vesicle.keyword, vesicle.nargs))
+    fetch?(KeywordRuleSignature.new(vesicle.keyword, vesicle.nargs)) do |rule|
+      # Attack is a heading pointing hdg the vesicle.
+      delta = (vesicle.mid - receiver.mid)
+      attack = Math.atan2(-delta.y, delta.x)
 
-    # Attack is a heading pointing hdg the vesicle.
-    delta = (vesicle.mid - receiver.mid)
-    attack = Math.atan2(-delta.y, delta.x)
-
-    rule.answer(receiver, vesicle, attack)
+      rule.answer(receiver, vesicle, attack)
+    end
   end
 
   def born(receiver : Cell)
@@ -935,7 +950,7 @@ record RuleBlock < Block, header : Excerpt, code : Excerpt do
     # <messageKeyword> ::= <alpha> <alnum>*
     #
     start = header.map(scanner.offset)
-    unless keyword = scanner.scan(/(?:[A-Za-z]\w*)/)
+    unless keyword = scanner.scan(/(?:[A-Za-z]\w*|\*)/)
       return ParseResult.hint(start, "I want keyword (aka message name) here!")
     end
 
@@ -2562,7 +2577,7 @@ class Console
     @header.fill_color = SF::Color.new(0x54, 0x80, 0x95)
 
     # Create title text
-    @title = SF::Text.new("** Console ** Double click to fold/unfold", FONT_BOLD, 11)
+    @title = SF::Text.new(title_string, FONT_BOLD, 11)
 
     l, c, h = LCH.rgb2lch(0x54, 0x80, 0x95)
 
@@ -2572,6 +2587,15 @@ class Console
     @scrolly = 0
     @folded = false
     @folded_manually = false
+  end
+
+  def title_string
+    String.build do |io|
+      io << "** Console ** Double click to fold/unfold"
+      unless @buffer.empty?
+        io << " (" << @buffer.size << ")"
+      end
+    end
   end
 
   def header_height
@@ -2656,6 +2680,8 @@ class Console
 
   def draw(target : SF::RenderTarget, states : SF::RenderStates)
     @header.draw(target, states)
+
+    @title.string = title_string
 
     title_width = @title.global_bounds.width + @title.local_bounds.left
     title_height = @title.global_bounds.height + @title.local_bounds.top
@@ -2967,9 +2993,13 @@ end
 # [x] do not show hint panel when editor is active (aka when anything is being inspected)
 # [x] add a console window to hud inside editor and redirect print() to that console
 # [x] print "paused" on hud when time is stopped
+# [x] display buffer size in console title
+# [x] add '*' wildcard message
 # [ ] support clone using C-Middrag
 # [ ] wormhole wire -- listen at both ends, teleport to the opposite end
 #       represented by two circles "regions" at both ends connected by a 1px line
+# [ ] add "sink" messages which store the last received message
+#     and answer after N millis
 # [ ] refactor event+mode system to use smaller handlers & have better focus
 # [ ] add selection rectangle (c-shift mode) to drag/copy/clone/delete multiple entities
 #     selection rectangle :: to select new things
