@@ -6,7 +6,12 @@ self.maxSpeed = 100
 
 ping |
   if not (sender == id) then
-    self.hdg = attack
+    if decay > 0.4 then
+      self.hdg = attack
+    else
+      self.hdg = evasion
+      self.speed = self.maxSpeed
+    end
     self.speed = decay * self.maxSpeed + self.minSpeed
   end
 
