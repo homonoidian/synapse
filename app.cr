@@ -2205,7 +2205,8 @@ class Mode::Normal < Mode
       cells and inspect them simultaneously. Move cells around
       by dragging them. Click on a cell to inspect it. Hit Esc to
       uninspect; then press Delete/Backspace to go into slaying
-      mode.
+      mode. Note that this panel will disappear when you start
+      inspecting.
       END
     )
   end
@@ -2216,15 +2217,17 @@ class Mode::Normal < Mode
   end
 
   @clicks = 0
+  @prev_button : SF::Mouse::Button?
   @clickclock : SF::Clock? = nil
 
   def map(app, event : SF::Event::MouseButtonPressed)
     coords = app.coords(event)
 
-    if (cc = @clickclock) && cc.elapsed_time.as_milliseconds < 300
+    if (cc = @clickclock) && cc.elapsed_time.as_milliseconds < 300 && event.button == @prev_button
       @clicks = 2
     else
       @clicks = 1
+      @prev_button = event.button
     end
 
     @mouse = event.x.at(event.y)
@@ -2258,7 +2261,7 @@ class Mode::Normal < Mode
         sender: MOUSE_ID,
         keyword: "mouse",
         args: [] of Memorable,
-        strength: 140
+        strength: (@clicks == 2 ? 250 : 130)
       ), SF::Color::White, deadzone: 1)
     end
 
@@ -2481,7 +2484,8 @@ class Mode::Ctrl < Mode
       title: "Ctrl-Mode",
       desc: <<-END
       Drag to pan around. Use mouse wheel to zoom. Click the
-      middle mouse button to reset zoom.
+      middle mouse button to reset zoom. Use right mouse button
+      to shallow-copy a cell.
       END
     )
   end
@@ -2805,6 +2809,7 @@ class App
   def pan(delta : Vector2)
     view = @editor.view
     view.center += delta.sf
+    view.center = SF.vector2f(view.center.x.round, view.center.y.round)
     @editor.view = view
   end
 
@@ -2820,6 +2825,7 @@ class App
     @factor *= factor
 
     view = @editor.view
+    view.center = SF.vector2f(view.center.x.round, view.center.y.round)
     view.zoom(factor)
     @editor.view = view
   end
@@ -2999,7 +3005,7 @@ end
 # [x] add '*' wildcard message
 # [ ] support clone using C-Middrag
 # [ ] wormhole wire -- listen at both ends, teleport to the opposite end
-#       represented by two circles "regions" at both ends connected by a 1px line
+#     represented by two circles "regions" at both ends connected by a 1px line
 # [ ] add "sink" messages which store the last received message
 #     and answer after N millis
 # [ ] refactor event+mode system to use smaller handlers & have better focus
