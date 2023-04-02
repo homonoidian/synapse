@@ -2559,6 +2559,10 @@ class Console
   @col : Float32
 
   def initialize(@rows : Int32, @cols : Int32)
+    @scrolly = 0
+    @folded = false
+    @folded_manually = false
+
     @buffer = [] of String
 
     @text = SF::Text.new("", FONT, 11)
@@ -2583,17 +2587,15 @@ class Console
 
     # @title.fill_color = p SF::Color.new(*LCH.lch2rgb(30, c, h))
     @title.fill_color = SF::Color.new(28, 76, 95)
-
-    @scrolly = 0
-    @folded = false
-    @folded_manually = false
   end
 
   def title_string
     String.build do |io|
       io << "** Console ** Double click to fold/unfold"
       unless @buffer.empty?
-        io << " (" << @buffer.size << ")"
+        scroll_win_start = Math.max(0, @buffer.size - @rows - @scrolly)
+        scroll_win_end = scroll_win_start + @rows
+        io << " (from " << scroll_win_start << " to " << scroll_win_end << ")"
       end
     end
   end
