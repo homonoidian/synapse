@@ -2101,7 +2101,7 @@ abstract class Mode
   # Returns the title and description of a mode.
   abstract def hint : ModeHint
 
-  def draw(target, states)
+  def draw(target : SF::RenderTarget, states : SF::RenderStates)
     gap_y = 8
     padding = 5
 
@@ -2142,6 +2142,12 @@ abstract class Mode
     bg.draw(target, states)
     title.draw(target, states)
     desc.draw(target, states)
+  end
+
+  def draw(app : App, target : SF::RenderTarget)
+    return unless app.tank.inspecting?(nil)
+
+    target.draw(self)
   end
 
   def tick(app)
@@ -2340,7 +2346,7 @@ class Mode::Shift < Mode::Normal
 
   def hint : ModeHint
     ModeHint.new(
-      title: "Shift-mode",
+      title: "Shift-Mode",
       desc: <<-END
       Click on a cell/empty space to create a wire from/to
       where you clicked. Use mouse wheel to scroll horizontally.
@@ -2403,7 +2409,7 @@ class Mode::Shift < Mode::Normal
     super
   end
 
-  def draw(target, states)
+  def draw(target : SF::RenderTarget, states : SF::RenderStates)
     super
 
     return unless @wire.from || @wire.to
@@ -2426,8 +2432,7 @@ class Mode::Ctrl < Mode
       title: "Ctrl-Mode",
       desc: <<-END
       Drag to pan around. Use mouse wheel to zoom. Click the
-      middle mouse button to reset zoom. In Ctrl-Mode, the code
-      editor cursor step is set to words.
+      middle mouse button to reset zoom.
       END
     )
   end
@@ -2623,11 +2628,8 @@ class App
     # Draw hud (mode).
     #
     @hud.clear(SF::Color.new(0x21, 0x21, 0x21, 0))
-    @hud.draw(@mode)
+    @mode.draw(self, @hud)
     @hud.display
-
-    # dst.rgb = src_alpha * src.rgb + (1 - src_alpha) * dst.rgb
-    # dst.a = 1 * src.a + (1 - src_alpha) * dst.a
 
     #
     # Draw sprites for both.
@@ -2734,18 +2736,20 @@ end
 # [x] implement ctrl-c/ctrl-v of buffer contents
 # [x] In Mode#draw(), draw hint panel which says what mode it is and how to
 #     use it; draw into a separate RenderTexture for no zoom on it
-# [ ] make message name italic (aka basic syntax highlighting)
-# [ ] animate what's in brackets `heartbeat [300ms] |` based on progress of
-#     the associated task (very tiny bit of dimmer/lighter; do not steal attention!)
+# [x] do not show hint panel when editor is active (aka when anything is being inspected)
+# [ ] add a console window to hud inside editor and redirect print() to that console
 # [ ] support clone using C-Middrag
 # [ ] wormhole wire -- listen at both ends, teleport to the opposite end
 #       represented by two circles "regions" at both ends connected by a 1px line
 # [ ] add selection rectangle (c-shift mode) to drag/copy/clone/delete multiple cells
-# [ ] add drawableallocator to reuse shapes instead of reallocating them
-#     on every frame in draw(...); attach DA to App, pass to draw()s
+# [ ] add drawableallocator object pool to reuse shapes instead of reallocating
+#     them on every frame in draw(...); attach DA to App, pass to draw()s
 #     inside DA.frame { ... } in mainloop
 # [ ] introduce clock authority which will control clocks for heartbeats &
 #     timetables, and make the clocks react to toggle time
+# [ ] make message name italic (aka basic syntax highlighting)
+# [ ] animate what's in brackets `heartbeat [300ms] |` based on progress of
+#     the associated task (very tiny bit of dimmer/lighter; do not steal attention!)
 # [ ] refactor, simplify, remove useless method dancing? use smaller
 #     objects, object-ize everything, get rid of getters and properties
 #     in Cell, e.g. refactor all methods that use (*, in tank : Tank) to a
