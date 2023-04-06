@@ -533,7 +533,7 @@ end
 class HeartbeatRuleSignature < RuleSignature
   getter period
 
-  def initialize(@period : Int32?)
+  def initialize(@period : Time::Span?)
   end
 
   def_equals_and_hash period
@@ -684,7 +684,7 @@ class HeartbeatRule < KeywordRule
   end
 
   def signature
-    HeartbeatRuleSignature.new(@period.try &.total_milliseconds.to_i || -1)
+    HeartbeatRuleSignature.new(@period)
   end
 
   @corrupt = false
@@ -830,19 +830,6 @@ class Protocol
 
   def born(receiver : Cell)
     @birth.answer(receiver)
-  end
-end
-
-class ProtocolEditorModel
-  getter id : UUID
-  property protocol : Protocol
-  property cursor : Int32
-  property buffer : TextBuffer
-  property markers : Hash(Int32, Marker)
-  property? sync : Bool
-
-  def initialize(@protocol, @cursor = 0, @buffer = TextBuffer.new, @markers = {} of Int32 => Marker, @sync = true)
-    @id = UUID.random
   end
 end
 
@@ -1050,20 +1037,50 @@ record Marker, color : SF::Color, offset : Int32, tally : Hash(String, Int32) do
   end
 end
 
+alias MarkerCollection = Hash(Int32, Marker)
+
+class BufferEditorState
+  property cursor : Int32 # TODO: remove
+
+  getter buffer : TextBuffer        # TODO: remove
+  getter markers : MarkerCollection # TODO: remove
+
+  def initialize(
+    @cursor = 0,
+    @buffer = TextBuffer.new,
+    @markers = MarkerCollection.new
+  )
+  end
+end
+
+class ProtocolEditorState
+  getter id : UUID
+  property protocol : Protocol
+  property? sync : Bool
+
+  def initialize(@protocol, @bstate = BufferEditorState.new, @sync = true)
+    @id = UUID.random
+  end
+
+  delegate :cursor, :cursor=, to: @bstate
+  delegate :buffer, :buffer=, to: @bstate
+  delegate :markers, :markers=, to: @bstate
+end
+
 class ProtocolEditor
   include SF::Drawable
 
-  getter model
+  getter state
 
-  def initialize(@cell : Cell, @model : ProtocolEditorModel)
+  def initialize(@cell : Cell, @state : ProtocolEditorState)
   end
 
   def initialize(cell : Cell, protocol : Protocol)
-    initialize(cell, ProtocolEditorModel.new(protocol))
+    initialize(cell, ProtocolEditorState.new(protocol))
   end
 
   def initialize(cell : Cell, other : ProtocolEditor)
-    initialize(cell, other.@model)
+    initialize(cell, other.state)
   end
 
   def mark(color : SF::Color, offset : Int32, message : String)
@@ -1090,11 +1107,11 @@ class ProtocolEditor
     parse
   end
 
-  private delegate :cursor, :cursor=, to: @model
-  private delegate :buffer, :buffer=, to: @model
-  private delegate :protocol, :protocol=, to: @model
-  private delegate :markers, :markers=, to: @model
-  private delegate :sync?, :sync=, to: @model
+  private delegate :cursor, :cursor=, to: @state
+  private delegate :buffer, :buffer=, to: @state
+  private delegate :protocol, :protocol=, to: @state
+  private delegate :markers, :markers=, to: @state
+  private delegate :sync?, :sync=, to: @state
 
   def unsync(err : ErrResult)
     # Signal that what's currently running is out of sync from
@@ -3012,6 +3029,12 @@ end
 # [ ] add selection rectangle (c-shift mode) to drag/copy/clone/delete multiple entities
 #     selection rectangle :: to select new things
 #     selection :: contains new and previously selected things
+# [ ] use a dialect of Lisp instead of Lua
+# [ ] make it possible for cells to send each other definitions and
+#     pieces of code. given it's Lisp, that should be either free or
+#     pretty straight-forward
+# [ ] extend the notion of *actors*: allow cells to own actors in Scene
+#     and move/resize/fill/control them.
 # [ ] add drawableallocator object pool to reuse shapes instead of reallocating
 #     them on every frame in draw(...); attach DA to App, pass to draw()s
 #     inside DA.frame { ... } in mainloop
