@@ -13,12 +13,12 @@ struct Line
   end
 
   # Returns whether this line is the first line.
-  def first_line?
+  def first?
     ord.zero?
   end
 
   # Returns whether this line is the last line.
-  def last_line?
+  def last?
     ord == @buf.lines - 1
   end
 

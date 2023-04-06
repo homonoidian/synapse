@@ -14,6 +14,7 @@ require "string_scanner"
 require "./ext"
 require "./line"
 require "./buffer"
+require "./buffer_editor"
 
 FONT        = SF::Font.from_memory({{read_file("./scientifica.otb")}}.to_slice)
 FONT_BOLD   = SF::Font.from_memory({{read_file("./scientificaBold.otb")}}.to_slice)
@@ -1039,40 +1040,29 @@ end
 
 alias MarkerCollection = Hash(Int32, Marker)
 
-class BufferEditorState
-  property cursor : Int32 # TODO: remove
-
-  getter buffer : TextBuffer        # TODO: remove
-  getter markers : MarkerCollection # TODO: remove
-
-  def initialize(
-    @cursor = 0,
-    @buffer = TextBuffer.new,
-    @markers = MarkerCollection.new
-  )
-  end
-end
-
 class ProtocolEditorState
-  getter id : UUID
-  property protocol : Protocol
-  property? sync : Bool
+  getter id : UUID             # TODO: remove
+  property protocol : Protocol # TODO: remove
+  property? sync : Bool        # TODO: remove
+  getter bstate                # TODO: remove
+  getter markers               # TODO: remove
 
-  def initialize(@protocol, @bstate = BufferEditorState.new, @sync = true)
+  def initialize(@protocol, @bstate = BufferEditorState.new, @markers = MarkerCollection.new, @sync = true)
     @id = UUID.random
   end
 
-  delegate :cursor, :cursor=, to: @bstate
-  delegate :buffer, :buffer=, to: @bstate
-  delegate :markers, :markers=, to: @bstate
+  delegate :cursor, :cursor=, to: @bstate   # TODO: remove
+  delegate :buffer, :buffer=, to: @bstate   # TODO: remove
+  delegate :markers, :markers=, to: @bstate # TODO: remove
 end
 
 class ProtocolEditor
   include SF::Drawable
 
-  getter state
+  getter state # TODO: remove
 
   def initialize(@cell : Cell, @state : ProtocolEditorState)
+    @editor = BufferEditor.new(@state.bstate)
   end
 
   def initialize(cell : Cell, protocol : Protocol)
@@ -1083,35 +1073,27 @@ class ProtocolEditor
     initialize(cell, other.state)
   end
 
-  def mark(color : SF::Color, offset : Int32, message : String)
-    mark Marker.new(color, offset, message)
-  end
+  # private delegate :cursor, :cursor=, to: @state     # TODO: remove
+  # private delegate :buffer, :buffer=, to: @state     # TODO: remove
+  private delegate :protocol, :protocol=, to: @state # TODO: remove
+  private delegate :markers, :markers=, to: @state   # TODO: remove
+  private delegate :sync?, :sync=, to: @state        # TODO: remove
 
-  def mark(marker : Marker)
-    if prev = markers[marker.offset]?
-      marker = prev.stack(marker)
-    end
-
-    markers[marker.offset] = marker
-  end
-
-  def source
-    buffer.string
+  def refresh # FIXME: wtf?
+    @editor.refresh
   end
 
   def update
-    markers.clear
-    buffer.update do |source|
-      yield source
-    end
-    parse
-  end
+    before = @state.bstate.capture
+    yield
+    after = @state.bstate.capture
 
-  private delegate :cursor, :cursor=, to: @state
-  private delegate :buffer, :buffer=, to: @state
-  private delegate :protocol, :protocol=, to: @state
-  private delegate :markers, :markers=, to: @state
-  private delegate :sync?, :sync=, to: @state
+    unless before == after
+      markers.clear
+
+      parse(after.string)
+    end
+  end
 
   def unsync(err : ErrResult)
     # Signal that what's currently running is out of sync from
@@ -1121,115 +1103,24 @@ class ProtocolEditor
     mark(SF::Color::Red, err.index, err.error.message || "lua error")
   end
 
-  def handle(event : SF::Event::KeyPressed)
-    case event.code
-    when .backspace?
-      return if cursor.zero?
-
-      e = cursor - 1
-      b = e
-      if event.control
-        b = buffer.word_begin_at(b)
-      end
-
-      update do |source|
-        source.delete_at(b..e)
-      end
-
-      self.cursor -= e - b + 1
-    when .delete?
-      return if cursor == buffer.size - 1
-
-      b = cursor
-      e = b
-      if event.control
-        e = buffer.word_end_at(e)
-      end
-
-      update do |source|
-        source.delete_at(b..e)
-      end
-    when .enter?
-      line = buffer.line_at(cursor)
-
-      head = String.build do |io|
-        io << '\n'
-
-        next if cursor == line.b
-        buffer.line_at(cursor).each_char do |char|
-          break unless char.in?(' ', '\t')
-          io << char
-        end
-      end
-
-      update do |source|
-        source.insert(cursor, head)
-      end
-
-      self.cursor += head.size
-    when .tab?
-      update do |source|
-        source.insert(cursor, "  ")
-      end
-      self.cursor += 2
-    when .left?
-      return if cursor.zero?
-
-      self.cursor = event.control ? buffer.word_begin_at(cursor - 1) : cursor - 1
-    when .right?
-      return if cursor == buffer.size - 1
-
-      self.cursor = event.control ? buffer.word_end_at(cursor + 1) : cursor + 1
-    when .home?
-      line = buffer.line_at(cursor)
-      self.cursor = line.b
-    when .end?
-      line = buffer.line_at(cursor)
-      self.cursor = line.e
-    when .up?
-      line = buffer.line_at(cursor)
-      if line.first_line?
-        self.cursor = 0
-      else
-        dest = buffer.fetch_line(line.ord - 1)
-        self.cursor = dest.b + Math.min(cursor - line.b, dest.size)
-      end
-    when .down?
-      line = buffer.line_at(cursor)
-      if line.last_line?
-        self.cursor = buffer.size - 1
-      else
-        dest = buffer.fetch_line(line.ord + 1)
-        self.cursor = dest.b + Math.min(cursor - line.b, dest.size)
-      end
-    when .c?
-      return unless event.control
-
-      SF::Clipboard.string = source
-    when .v?
-      return unless event.control
-
-      update { SF::Clipboard.string }
-
-      self.cursor = buffer.size - 1
-    end
+  def mark(color : SF::Color, offset : Int32, message : String)
+    mark Marker.new(color, offset, message)
   end
 
-  def handle(event : SF::Event::TextEntered)
-    chr = event.unicode.chr
-
-    return unless chr.printable?
-
-    update do |source|
-      source.insert(cursor, chr)
+  def mark(marker : Marker)
+    # FIXME: this is MarkerCollection business!
+    if prev = markers[marker.offset]?
+      marker = prev.stack(marker)
     end
-    self.cursor += 1
+
+    markers[marker.offset] = marker
   end
 
   def handle(event)
+    update { @editor.handle(event) }
   end
 
-  def parse(source : String)
+  def rules_in(source : String)
     stack = [BirthBlock.new(Excerpt.new("", 0))] of Block
     offset = 0
     results = [] of ParseResult
@@ -1254,8 +1145,8 @@ class ProtocolEditor
     results
   end
 
-  def parse
-    results = parse(source)
+  def parse(source : String)
+    results = rules_in(source)
     signatures = Set(RuleSignature).new
     if results.empty?
       self.sync = true
@@ -1291,14 +1182,10 @@ class ProtocolEditor
   def draw(target, states)
     @origin = origin = @cell.mid + @cell.class.radius * 1.1
 
-    text = SF::Text.new(source, FONT, 11)
-    text.position = (origin + 15.at(15)).sfi
-    text.line_spacing = 1.3
+    @editor.view.position = (origin + 15.at(15)).sfi
 
-    text_width = text.global_bounds.width + text.local_bounds.left
-    text_height = text.global_bounds.height + text.local_bounds.top
+    extent = @editor.view.size + SF.vector2f(30, 30)
 
-    extent = SF.vector2f(text_width + 30, text_height + 30)
     @corner = origin + Vector2.new(extent)
 
     sync_color = sync? ? SF::Color.new(0x81, 0xD4, 0xFA, 0x88) : SF::Color.new(0xEF, 0x9A, 0x9A, 0x88)
@@ -1334,12 +1221,12 @@ class ProtocolEditor
 
     #
     # Draw thick left bar which shows whether the code is
-    # synchronized with what's running.s
+    # synchronized with what's running.
     #
     bar = SF::RectangleShape.new
     bar.fill_color = sync_color
     bar.position = origin.sfi
-    bar.size = SF.vector2f(4, text_height + 30)
+    bar.size = SF.vector2f(4, extent.y)
     bar.draw(target, states)
 
     #
@@ -1358,11 +1245,11 @@ class ProtocolEditor
 
       b = kwrule.header_start
 
-      b_pos = text.find_character_pos(b)
+      b_pos = @editor.view.find_character_pos(b)
 
       h_bg = SF::RectangleShape.new
-      h_bg.position = SF.vector2f(bg_rect.position.x, b_pos.y + text.character_size * (text.line_spacing - 1)/2)
-      h_bg.size = SF.vector2f(bg_rect.size.x, text.character_size)
+      h_bg.position = SF.vector2f(bg_rect.position.x, b_pos.y) + @editor.view.beam_margin
+      h_bg.size = SF.vector2f(bg_rect.size.x, @editor.view.font_size)
       h_bg.fill_color = rule_header_bg
 
       h_sep_top = SF::RectangleShape.new
@@ -1382,39 +1269,21 @@ class ProtocolEditor
 
     rule_headers.each &.draw(target, states)
 
-    #
-    # Draw beam.
-    #
-    beam = SF::RectangleShape.new
-    beam.fill_color = SF::Color.new(0x9E, 0x9E, 0x9E)
-
-    # If there is no source, beam is 1 pixel wide.
-    cur = text.find_character_pos(cursor)
-    nxt = text.find_character_pos(cursor + 1)
-
-    beam.position = cur + SF.vector2f(0, text.character_size * (text.line_spacing - 1)/2)
-    beam.size = SF.vector2f(Math.max(4, nxt.x - cur.x), text.character_size)
-    beam.draw(target, states)
-
-    #
-    # Draw buffer contents.
-    #
-    text.fill_color = SF::Color.new(0xee, 0xee, 0xee)
-    text.draw(target, states)
+    @editor.draw(target, states)
 
     #
     # Draw markers
     #
     markers.each_value do |marker|
-      coords = text.find_character_pos(marker.offset)
+      coords = @editor.view.find_character_pos(marker.offset)
 
       # If cursor is below marker offset, we want this marker
       # to be above.
-      m_line = buffer.line_at(marker.offset)
-      c_line = buffer.line_at(cursor)
+      m_line = state.bstate.index_to_line(marker.offset)
+      c_line = state.bstate.line
       flip = c_line.ord > m_line.ord
 
-      offset = SF.vector2f(0, text.character_size * text.line_spacing)
+      offset = SF.vector2f(0, @editor.view.line_height)
       coords += flip ? SF.vector2f(3, -3.5) : offset
 
       # To enable variation while maintaining uniformity with
@@ -1426,7 +1295,7 @@ class ProtocolEditor
 
       mtext = SF::Text.new(marker.message, FONT, 11)
 
-      mbg_rect_position = coords + (flip ? SF.vector2f(-6, -(text.character_size * text.line_spacing) - 0.2) : SF.vector2f(-3, 4.5))
+      mbg_rect_position = coords + (flip ? SF.vector2f(-6, -@editor.view.line_height - 0.2) : SF.vector2f(-3, 4.5))
       mbg_rect_size = SF.vector2f(
         mtext.global_bounds.width + mtext.local_bounds.left + 10,
         mtext.global_bounds.height + mtext.local_bounds.top + 4
@@ -1702,6 +1571,8 @@ class Cell < RoundEntity
   end
 
   def start_inspection?(in tank : Tank)
+    @editor.refresh
+
     true
   end
 
