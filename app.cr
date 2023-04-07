@@ -16,11 +16,13 @@ require "./line"
 require "./buffer"
 require "./buffer_editor"
 
-FONT        = SF::Font.from_memory({{read_file("./scientifica.otb")}}.to_slice)
-FONT_BOLD   = SF::Font.from_memory({{read_file("./scientificaBold.otb")}}.to_slice)
-FONT_ITALIC = SF::Font.from_memory({{read_file("./scientificaItalic.otb")}}.to_slice)
+FONT        = SF::Font.from_memory({{read_file("./fonts/code/scientifica.otb")}}.to_slice)
+FONT_BOLD   = SF::Font.from_memory({{read_file("./fonts/code/scientificaBold.otb")}}.to_slice)
+FONT_ITALIC = SF::Font.from_memory({{read_file("./fonts/code/scientificaItalic.otb")}}.to_slice)
 
-FONT_UI = SF::Font.from_memory({{read_file("OpenSans-VariableFont_wdth,wght.ttf")}}.to_slice)
+FONT_UI        = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Regular.ttf")}}.to_slice)
+FONT_UI_MEDIUM = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Medium.ttf")}}.to_slice)
+FONT_UI_BOLD   = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Bold.ttf")}}.to_slice)
 
 FONT.get_texture(11).smooth = false
 FONT_BOLD.get_texture(11).smooth = false
@@ -1085,7 +1087,8 @@ class ProtocolEditor
   getter state # TODO: remove
 
   def initialize(@cell : Cell, @state : ProtocolEditorState)
-    @editor = BufferEditor.new(@state.bstate)
+    @editor_view = BufferEditorView.new
+    @editor = BufferEditor.new(@state.bstate, @editor_view)
   end
 
   def initialize(cell : Cell, protocol : Protocol)
@@ -1205,9 +1208,9 @@ class ProtocolEditor
   def draw(target, states)
     @origin = origin = @cell.mid + @cell.class.radius * 1.1
 
-    @editor.view.position = (origin + 15.at(15)).sfi
+    @editor_view.position = (origin + 15.at(15)).sfi
 
-    extent = @editor.view.size + SF.vector2f(30, 30)
+    extent = @editor_view.size + SF.vector2f(30, 30)
 
     @corner = origin + Vector2.new(extent)
 
@@ -1268,11 +1271,11 @@ class ProtocolEditor
 
       b = kwrule.header_start
 
-      b_pos = @editor.view.find_character_pos(b)
+      b_pos = @editor_view.find_character_pos(b)
 
       h_bg = SF::RectangleShape.new
-      h_bg.position = SF.vector2f(bg_rect.position.x, b_pos.y) + @editor.view.beam_margin
-      h_bg.size = SF.vector2f(bg_rect.size.x, @editor.view.font_size)
+      h_bg.position = SF.vector2f(bg_rect.position.x, b_pos.y) + @editor_view.beam_margin
+      h_bg.size = SF.vector2f(bg_rect.size.x, @editor_view.font_size)
       h_bg.fill_color = rule_header_bg
 
       h_sep_top = SF::RectangleShape.new
@@ -1298,7 +1301,7 @@ class ProtocolEditor
     # Draw markers
     #
     markers.each_value do |marker|
-      coords = @editor.view.find_character_pos(marker.offset)
+      coords = @editor_view.find_character_pos(marker.offset)
 
       # If cursor is below marker offset, we want this marker
       # to be above.
@@ -1306,7 +1309,7 @@ class ProtocolEditor
       c_line = state.bstate.line
       flip = c_line.ord > m_line.ord
 
-      offset = SF.vector2f(0, @editor.view.line_height)
+      offset = SF.vector2f(0, @editor_view.line_height)
       coords += flip ? SF.vector2f(3, -3.5) : offset
 
       # To enable variation while maintaining uniformity with
@@ -1318,7 +1321,7 @@ class ProtocolEditor
 
       mtext = SF::Text.new(marker.message, FONT, 11)
 
-      mbg_rect_position = coords + (flip ? SF.vector2f(-6, -@editor.view.line_height - 0.2) : SF.vector2f(-3, 4.5))
+      mbg_rect_position = coords + (flip ? SF.vector2f(-6, -@editor_view.line_height - 0.2) : SF.vector2f(-3, 4.5))
       mbg_rect_size = SF.vector2f(
         mtext.global_bounds.width + mtext.local_bounds.left + 10,
         mtext.global_bounds.height + mtext.local_bounds.top + 4
@@ -2053,9 +2056,8 @@ abstract class Mode
     gap_y = 8
     padding = 5
 
-    title = SF::Text.new(hint.title, FONT_UI, 16)
+    title = SF::Text.new(hint.title, FONT_UI_BOLD, 16)
     title.position = SF.vector2f(padding, padding)
-    title.style = SF::Text::Style::Bold
     title.color = SF::Color.new(0x3c, 0x30, 0x00)
 
     title_width = title.global_bounds.width + title.local_bounds.left
@@ -2943,6 +2945,8 @@ end
 # [ ] make message name italic (aka basic syntax highlighting)
 # [ ] animate what's in brackets `heartbeat [300ms] |` based on progress of
 #     the associated task (very tiny bit of dimmer/lighter; do not steal attention!)
+# [ ] use Tank#time (ish) instead of App.time for pausing time in a specific
+#     tank rather than the whole app
 # [ ] refactor, simplify, remove useless method dancing? use smaller
 #     objects, object-ize everything, get rid of getters and properties
 #     in Cell, e.g. refactor all methods that use (*, in tank : Tank) to a

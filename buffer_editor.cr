@@ -12,11 +12,14 @@ class BufferEditorState
   def initialize(@buffer = TextBuffer.new, @cursor = 0)
   end
 
-  private def update(&)
+  # Primitive: updates the buffer.
+  #
+  # **Unchecked**: may invalidate the state.
+  private def update!(&)
     @buffer.update { |string| yield string }
   end
 
-  # Moves cursor to *index*.
+  # Primitive: moves cursor to *index*.
   #
   # **Unchecked**: may invalidate the state.
   private def seek!(index : Int)
@@ -64,6 +67,11 @@ class BufferEditorState
   # the text buffer.
   def at_end?
     @cursor == self.end
+  end
+
+  # Returns whether to allow insertion of *printable*.
+  def insertable?(printable : String)
+    true
   end
 
   # Moves the cursor to the start of the text buffer.
@@ -171,7 +179,11 @@ class BufferEditorState
   # of the system clipboard. Moves the cursor to the end of the
   # text buffer.
   def from_clipboard
-    update { SF::Clipboard.string }
+    string = SF::Clipboard.string
+
+    return unless insertable?(string)
+
+    update! { string }
     to_end
   end
 
@@ -200,12 +212,13 @@ class BufferEditorState
   # Inserts *printable* where the cursor is positioned. Moves
   # the cursor after the inserted object.
   def insert(printable : Char)
-    insert_at(@cursor, printable)
-    seek!(@cursor + 1)
+    insert(printable.to_s)
   end
 
   # :ditto:
   def insert(printable : String)
+    return unless insertable?(printable)
+
     insert_at(@cursor, printable)
     seek!(@cursor + printable.size)
   end
@@ -250,35 +263,34 @@ class BufferEditorState
   # Inserts *printable* at the given *index*.
   #
   # Raises if *index* is out of bounds.
-  def insert_at(index : Int, printable : String | Char)
-    update &.insert(index, printable)
+  def insert_at(index : Int, printable : String)
+    update! &.insert(index, printable)
   end
 
   # Deletes character(s) at the given *index*.
   #
   # Raises if *index* is out of bounds.
   def delete_at(index : Range | Int)
-    update &.delete_at(index)
+    update! &.delete_at(index)
   end
 end
 
-# An `SF::Drawable` view of `BufferEditorInstant`.
+# An `SF::Drawable` view of `BufferEditorState`.
 class BufferEditorView
   include SF::Drawable
 
+  # Determines whether this view is active.
+  property? active = true
+
   def initialize
     @text = SF::Text.new("", font, font_size)
-    @text.fill_color = text_color
-    @text.line_spacing = 1.3
+    @text.line_spacing = line_spacing
 
     @beam = SF::RectangleShape.new
-    @beam.fill_color = beam_color
   end
 
-  # Synchronizes the contents of this view with *state*.
-  def update(state : BufferEditorState)
-    instant = state.capture
-
+  # Synchronizes the contents of this view according to *instant*.
+  def update(instant : BufferEditorInstant)
     @text.string = instant.string
 
     cur = find_character_pos(instant.cursor)
@@ -286,6 +298,11 @@ class BufferEditorView
 
     @beam.position = cur + beam_margin
     @beam.size = SF.vector2f(Math.max(4, nxt.x - cur.x), font_size)
+  end
+
+  # Synchronizes the contents of this view according to *state*.
+  def update(state : BufferEditorState)
+    update(state.capture)
   end
 
   # Returns the font used in this view.
@@ -298,9 +315,14 @@ class BufferEditorView
     11
   end
 
+  # Line height as a multiple of font size.
+  def line_spacing
+    1.3
+  end
+
   # Returns the line height used in this view.
   def line_height
-    font_size * @text.line_spacing
+    font_size * line_spacing
   end
 
   # Returns the color used for the text contents of this view.
@@ -318,6 +340,11 @@ class BufferEditorView
     SF.vector2f(0, @text.character_size * (@text.line_spacing - 1)/2)
   end
 
+  # Returns the position of this view.
+  def position
+    @text.position
+  end
+
   # Translates this view to *position*.
   def position=(position : SF::Vector2)
     delta = position - @text.position
@@ -328,10 +355,7 @@ class BufferEditorView
 
   # Returns the full width and height of this view.
   def size
-    SF.vector2f(
-      @text.global_bounds.width + @text.local_bounds.left,
-      @text.global_bounds.height + @text.local_bounds.top
-    )
+    @text.size
   end
 
   # Returns the position of the character at the given *index*.
@@ -342,7 +366,12 @@ class BufferEditorView
   end
 
   def draw(target, states)
-    @beam.draw(target, states)
+    if active?
+      @beam.draw(target, states)
+      @beam.fill_color = beam_color
+    end
+
+    @text.fill_color = text_color
     @text.draw(target, states)
   end
 end
@@ -354,21 +383,31 @@ end
 class BufferEditor
   include SF::Drawable
 
-  getter view # FIXME: remove
-
-  def initialize(buffer : TextBuffer)
-    initialize(BufferEditorState.new(buffer))
-  end
-
-  def initialize(@state = BufferEditorState.new)
-    @view = BufferEditorView.new
-
+  def initialize(@state : BufferEditorState, @view : BufferEditorView)
     refresh
   end
 
   # Updates the view according to the state.
   def refresh
     @view.update(@state)
+  end
+
+  # Returns whether this editor can accept focus.
+  def can_focus?
+    true
+  end
+
+  # Returns whether this editor can release focus.
+  def can_blur?
+    true
+  end
+
+  # Accepts focus.
+  def focus
+  end
+
+  # Releases focus.
+  def blur
   end
 
   # Updates editor state based on *event*.
