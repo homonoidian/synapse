@@ -114,40 +114,69 @@ module Math
   end
 end
 
+# Clock authority issues clocks, and allows to pause/unpause them.
+class ClockAuthority
+  getter timewall
+
+  def initialize
+    @timewall = Time.monotonic
+  end
+
+  def unpause
+    @timewall = Time.monotonic
+  end
+end
+
 # A very primitive `SF::Clock`-based scheduler that doesn't
 # spawn fibers.
 class TimeTable
-  struct Entry
+  class Entry
     getter? repeating : Bool
 
-    def initialize(@clock : SF::Clock, @period : Time::Span, @code : ->, @repeating : Bool)
-    end
-
     # Returns the progress of this entry: a number from 0 to 1
-    # signifying how close this entry is to running.
-    def progress : Float64
-      progress = @clock.elapsed_time.as_milliseconds / @period.total_milliseconds
-      # Timing depends on framerate, therefore may overrun. Don't
-      # do anything about it & just clamp!
-      progress.clamp(0.0..1.0)
+    # signifying how close this entry is to being run/completion.
+    getter progress = 0.0
+
+    @timewall : Time::Span
+
+    def initialize(
+      @authority : ClockAuthority,
+      @period : Time::Span,
+      @code : ->,
+      @repeating : Bool
+    )
+      @timewall = @authority.timewall
+      @start = Time.monotonic
     end
 
     # Checks if time has come and runs the code. Returns whether
     # the entry is complete. Repeating entries are never complete.
     def run?
-      delta = @clock.elapsed_time.as_milliseconds - @period.total_milliseconds
-      return false unless delta >= 0
-
-      unless repeating?
-        @code.call
-        return true
+      if @timewall < @authority.timewall # Timewall "in the past"
+        @timewall = @authority.timewall
+        @start = @timewall - (@period * @progress)
       end
 
-      # We might have missed some...
-      count_f = (delta / @period.total_milliseconds).trunc + 1
-      count_f.to_i.times { @code.call }
+      clock_ms = (Time.monotonic - @start).total_milliseconds
+      period_ms = @period.total_milliseconds
 
-      @clock.restart
+      # Update the progress.
+      #
+      # Timing depends on framerate, therefore may overrun. Don't
+      # do anything about it & just clamp!
+      @progress = (clock_ms / period_ms).clamp(0.0..1.0)
+
+      delta = clock_ms - period_ms
+
+      return false unless delta >= 0
+
+      # We might have missed some...
+      count = ((delta / period_ms).trunc + 1).to_i
+      count.times { @code.call }
+
+      return true unless repeating?
+
+      @start = Time.monotonic
 
       false
     end
@@ -155,11 +184,14 @@ class TimeTable
 
   @tasks = {} of UUID => Entry
 
+  def initialize(@authority : ClockAuthority)
+  end
+
   # Executes *block* every *period* of time. Returns task identifier
   # so that you can e.g. cancel the task or change its period.
   def every(period : Time::Span, &code : ->) : UUID
     UUID.random.tap do |id|
-      @tasks[id] = Entry.new(SF::Clock.new, period, code, repeating: true)
+      @tasks[id] = Entry.new(@authority, period, code, repeating: true)
     end
   end
 
@@ -167,35 +199,13 @@ class TimeTable
   # so that you can e.g. cancel the task or change its period.
   def after(period : Time::Span, &code : ->) : UUID
     UUID.random.tap do |id|
-      @tasks[id] = Entry.new(SF::Clock.new, period, code, repeating: false)
+      @tasks[id] = Entry.new(@authority, period, code, repeating: false)
     end
   end
 
   # Cancels the given *task*.
   def cancel(task : UUID)
     @tasks.delete(task)
-  end
-
-  # Changes the configuration of an existing *task*.
-  #
-  # *period* specifies the period with which the task is going
-  # to run.
-  #
-  # *repeating* specifies whether the task is repeating (like `every`)
-  # or not (like `after`).
-  #
-  # If either of these options is `nil`, the old value is used.
-  #
-  # Raises if *task* does not exist.
-  def change(task : UUID, period : Time::Span? = nil, repeating : Bool? = nil)
-    entry = @tasks[task]
-
-    @tasks[task] = entry.copy_with(
-      period: period || entry.period,
-      repeating: repeatng.nil? ? entry.repeating : repeating,
-    )
-
-    nil
   end
 
   # Returns the progress (from 0 to 1) of an existing *task*.

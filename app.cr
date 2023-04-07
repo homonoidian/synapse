@@ -26,7 +26,7 @@ FONT.get_texture(11).smooth = false
 FONT_BOLD.get_texture(11).smooth = false
 FONT_ITALIC.get_texture(11).smooth = false
 
-# https://www.desmos.com/calculator/6rnk1vp9su
+# https://www.desmos.com/calculator/bk3g3l6txg
 def fmessage_amount(strength : Float)
   if strength <= 80
     1.8256 * Math.log(strength)
@@ -37,11 +37,33 @@ def fmessage_amount(strength : Float)
   end
 end
 
+def fmessage_amount_to_strength(amount : Float)
+  if amount < 8
+    Math::E**((625 * amount)/1141)
+  elsif amount < 32
+    (35 * Math.sqrt(amount - 8))/Math.sqrt(6) + 80
+  else
+    Math::E**(amount/8) + 47701/500
+  end
+end
+
 def fmessage_lifespan_ms(strength : Float)
   if strength <= 155
     2000 * Math::E**(-strength/60)
+  elsif strength <= 700
+    Math::E**(strength/100) + 146
   else
-    150
+    190 * Math.log(strength)
+  end
+end
+
+def fmessage_lifespan_ms_to_strength(lifespan_ms : Float)
+  if lifespan_ms <= 151
+    60 * Math.log(2000/lifespan_ms)
+  elsif lifespan_ms <= 1242
+    100 * Math.log(lifespan_ms - 146)
+  else
+    Math::E**(lifespan_ms/190)
   end
 end
 
@@ -55,7 +77,7 @@ abstract class Entity
   include SF::Drawable
 
   getter id : UUID
-  getter tt = TimeTable.new
+  getter tt = TimeTable.new(App.time)
 
   @decay_task_id : UUID
 
@@ -487,6 +509,7 @@ class ResponseContext
     stack.set_global("id", @receiver.id.to_s)
     stack.set_global("heading", ->heading(LibLua::State))
     stack.set_global("strength", ->strength(LibLua::State))
+    # TODO: set lifespan manually or use strength->lifespan formula
     stack.set_global("send", ->send(LibLua::State))
     stack.set_global("swim", ->swim(LibLua::State))
     stack.set_global("print", ->print(LibLua::State))
@@ -1762,7 +1785,7 @@ class Tank
     @entities = {} of UUID => Entity
     @actors = [] of Actor
 
-    @tt = TimeTable.new
+    @tt = TimeTable.new(App.time)
 
     dispatcher = TankDispatcher.new(self)
 
@@ -1908,7 +1931,7 @@ class Tank
   def distribute(origin : Vector2, message : Message, color : SF::Color, deadzone = Cell.radius * 1.2)
     vamt = fmessage_amount(message.strength)
 
-    return unless vamt.in?(1..1024) # safety belt
+    return unless vamt.in?(1.0..1024.0) # safety belt
 
     vrays = Math.max(1, vamt // 2)
 
@@ -1918,7 +1941,7 @@ class Tank
 
     vamt.times do |v|
       angle = Math.radians(((v / vrays) * 360) + rand * 360)
-      impulse = angle.dir * (message.strength * rand)
+      impulse = angle.dir * (10.0..100.0).sample # FIXME: should depend on strength
       vesicle = Vesicle.new(message, impulse, vlifespan, color, birth: Time.monotonic)
       vesicle.mid = origin + (angle.dir * deadzone)
       vesicle.summon(in: self)
@@ -2609,6 +2632,9 @@ end
 class App
   include SF::Drawable
 
+  class_getter the = App.new
+  class_getter time = ClockAuthority.new
+
   getter tank : Tank
   getter console : Console
 
@@ -2641,7 +2667,7 @@ class App
     @scene_window.framerate_limit = 60
 
     @tank = Tank.new
-    @tt = TimeTable.new
+    @tt = TimeTable.new(App.time)
 
     @console = Console::INSTANCE
     @console.folded = true
@@ -2730,6 +2756,9 @@ class App
 
   def toggle_time
     @time = !@time
+    if @time
+      App.time.unpause
+    end
   end
 
   def draw(target, states)
@@ -2891,6 +2920,8 @@ end
 # [x] print "paused" on hud when time is stopped
 # [x] display buffer size in console title
 # [x] add '*' wildcard message
+# [x] introduce clock authority which will control clocks for heartbeats &
+#     timetables, and make the clocks react to toggle time
 # [ ] support clone using C-Middrag
 # [ ] wormhole wire -- listen at both ends, teleport to the opposite end
 #     represented by two circles "regions" at both ends connected by a 1px line
@@ -2909,8 +2940,6 @@ end
 # [ ] add drawableallocator object pool to reuse shapes instead of reallocating
 #     them on every frame in draw(...); attach DA to App, pass to draw()s
 #     inside DA.frame { ... } in mainloop
-# [ ] introduce clock authority which will control clocks for heartbeats &
-#     timetables, and make the clocks react to toggle time
 # [ ] make message name italic (aka basic syntax highlighting)
 # [ ] animate what's in brackets `heartbeat [300ms] |` based on progress of
 #     the associated task (very tiny bit of dimmer/lighter; do not steal attention!)
@@ -2925,5 +2954,4 @@ end
 # [ ] write README with gifs
 # [ ] upload to GH
 
-app = App.new
-app.run
+App.the.run
