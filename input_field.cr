@@ -1,10 +1,6 @@
 # Exactly the same as `BufferEditorState`, but rejects input that
 # contains newlines -- effectively making the buffer single-line.
 class InputFieldState < BufferEditorState
-  def string : String
-    super.chomp
-  end
-
   def insertable?(printable : String)
     printable.each_byte do |byte|
       if byte === '\n' || byte === '\r'
@@ -45,12 +41,12 @@ class InputFieldView < BufferEditorView
   end
 
   def text_color
-    active? ? SF::Color.new(0xE0, 0xE0, 0xE0) : SF::Color.new(0x9E, 0x9E, 0x9E)
+    active? ? super : SF::Color.new(0xBD, 0xBD, 0xBD)
   end
 
   # Returns the size of this field.
   def size
-    SF.vector2i(@max_width || Math.max(@text.width, @min_width), @text.height)
+    SF.vector2i(@max_width || Math.max(@text.width, @min_width), line_height)
   end
 
   def draw(target, states)
@@ -98,40 +94,22 @@ class InputFieldView < BufferEditorView
       super
     end
 
+    return unless active?
+
     #
     # Draw background rectangle.
     #
     bgrect = SF::RectangleShape.new
     bgrect.fill_color = beam_color
-    bgrect.position = position + SF.vector2f(0, size.y - font_size//2)
+    bgrect.position = position + SF.vector2f(0, size.y + font_size//2)
     bgrect.size = SF.vector2f(size.x, 1)
     bgrect.draw(target, states)
   end
 end
 
 class InputField < BufferEditor
-  @focused = false
-
   def initialize(state : InputFieldState, view : InputFieldView)
     super
     view.active = false
-  end
-
-  def focus
-    @view.active = true
-    @focused = true
-    super
-  end
-
-  def blur
-    @view.active = false
-    @focused = false
-    super
-  end
-
-  def handle(event)
-    return unless @focused
-
-    super
   end
 end

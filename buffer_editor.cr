@@ -20,8 +20,6 @@ class BufferEditorState
 
   # Primitive: updates the buffer.
   #
-  # **Important**: will *always* end in a newline.
-  #
   # **Unchecked**: may invalidate the state. Make sure to
   # `seek!` to a valid index afterwards.
   def update!(&)
@@ -31,7 +29,7 @@ class BufferEditorState
   # Primitive: moves cursor to *index*. Clamps if out of bounds
   # after update (see `start_index`, `end_index`).
   def seek!(index : Int)
-    @cursor = index.clamp(start_index..end_index + 1)
+    @cursor = index.clamp(start_index..end_index)
   end
 
   # Captures and returns an instant of this state.
@@ -45,7 +43,7 @@ class BufferEditorState
   #
   # Noop if *index* is out of bounds.
   def seek(index : Int)
-    return unless index.in?(start_index..end_index + 1)
+    return unless index.in?(start_index..end_index)
 
     seek!(index)
   end
@@ -57,17 +55,23 @@ class BufferEditorState
 
   # Returns the amount of characters in the text buffer.
   def size
-    (end_index + 1) - start_index
+    end_index - start_index
   end
 
-  # Returns the index of the first character in this text buffer.
+  # Returns the index of the first character in the text buffer.
   def start_index
     0
   end
 
-  # Returns the index of the last character in this text buffer.
+  # Returns the index *after* the last character in the text buffer.
+  # This index acts as an insertion point.
   def end_index
-    @buffer.size - 1
+    @buffer.size
+  end
+
+  # Returns the index *of* the last character in the text buffer.
+  def max_index
+    end_index - 1
   end
 
   # Returns whether the cursor is positioned at the first
@@ -115,6 +119,18 @@ class BufferEditorState
     @buffer.fetch_line(line.ord + 1)
   end
 
+  # Returns whether the cursor is positioned in the first line
+  # of the buffer.
+  def at_first_line?
+    line.first?
+  end
+
+  # Returns whether the cursor is positioned in the last line
+  # of the buffer.
+  def at_last_line?
+    line.last?
+  end
+
   # Returns whether the cursor is at the start of the current line.
   def at_line_start?
     @cursor == line.b
@@ -138,6 +154,13 @@ class BufferEditorState
   # Returns the column number (starting from 0) of the cursor.
   def column
     @cursor - line.b
+  end
+
+  # Moves the cursor to the given *column* in the current line.
+  #
+  # Noop if *column* is out of line bounds.
+  def to_column(column : Int)
+    seek(line.b + column)
   end
 
   # Moves the cursor to the next character (*wordstep* is false)
@@ -226,7 +249,7 @@ class BufferEditorState
   def after_cursor : String
     return "" if at_end_index?
 
-    @buffer.slice(@cursor, end_index)
+    @buffer.slice(@cursor, max_index)
   end
 
   # **Destructive**: deletes what comes from the start index
@@ -234,13 +257,13 @@ class BufferEditorState
   def delete_after_cursor
     return if at_end_index?
 
-    delete_at(@cursor..end_index)
+    delete_at(@cursor..max_index)
   end
 
   # **Destructive**: clears the text buffer from the start index
-  # to the end index, and moves the cursor to the start index.
+  # to the maximum index, and moves the cursor to the start index.
   def clear
-    delete_at(start_index..end_index)
+    delete_at(start_index..max_index)
 
     to_start_index
   end
@@ -312,7 +335,7 @@ class BufferEditorState
   private def delete_char(index : Int32)
     delta = index - @cursor
 
-    return unless index.in?(start_index..end_index)
+    return unless index.in?(start_index..max_index)
 
     delete_at(index)
     seek!(@cursor + delta)
@@ -385,7 +408,7 @@ class BufferEditorView
 
   # Returns the color used for the text contents of this view.
   def text_color
-    SF::Color.new(0xee, 0xee, 0xee)
+    SF::Color.new(0xE0, 0xE0, 0xE0)
   end
 
   # Returns the color used for the cursor beam.
@@ -413,7 +436,7 @@ class BufferEditorView
 
   # Returns the full width and height of this view.
   def size
-    @text.size
+    @text.string.empty? ? @beam.size : @text.size
   end
 
   # Returns the position of the character at the given *index*.
@@ -441,7 +464,12 @@ end
 class BufferEditor
   include SF::Drawable
 
+  # Returns whether this editor is focused.
+  getter? focused : Bool
+
   def initialize(@state : BufferEditorState, @view : BufferEditorView)
+    @focused = @view.active?
+
     refresh
   end
 
@@ -462,11 +490,15 @@ class BufferEditor
 
   # Accepts focus.
   def focus
+    @view.active = true
+
     refresh
   end
 
   # Releases focus.
   def blur
+    @view.active = false
+
     refresh
   end
 
@@ -480,6 +512,8 @@ class BufferEditor
 
   # Updates editor state based on *event*.
   def handle(event : SF::Event::KeyPressed)
+    return unless focused?
+
     case event.code
     when .backspace? then @state.delete(wordstep: event.control, translation: -1)
     when .delete?    then @state.delete(wordstep: event.control)
@@ -508,6 +542,8 @@ class BufferEditor
 
   # :ditto:
   def handle(event : SF::Event::TextEntered)
+    return unless focused?
+
     chr = event.unicode.chr
 
     return unless chr.printable?

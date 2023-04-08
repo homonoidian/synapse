@@ -84,6 +84,18 @@ class TextBuffer
       lineno += 1
     end
 
+    if start <= @string.size || @string.empty?
+      line = Line.new(self, lineno, start, @string.size)
+
+      if lineno < lines
+        @lines[lineno] = line
+      else
+        @lines << line
+      end
+
+      lineno += 1
+    end
+
     # Get rid of excess old lines, if there are any.
     if lineno < lines
       @lines.clear_from(lineno)
@@ -93,9 +105,7 @@ class TextBuffer
   end
 
   # Sets buffer string to *string*.
-  def update(string : String, lineno = 0)
-    @string = string.ends_with?('\n') ? string : string + '\n'
-
+  def update(@string : String, lineno = 0)
     refresh(lineno)
   end
 
@@ -179,7 +189,7 @@ class TextBuffer
   # Find end position by going forth as far as possible, stopping
   # either on word stop characters or the first whitespace.
   def word_end_at(index : Int)
-    return size - 1 if index >= size - 1
+    return size if index >= size
 
     reader = Char::Reader.new(@string, index)
 
@@ -190,7 +200,7 @@ class TextBuffer
       end
     end
 
-    Math.min(reader.pos, size - 1)
+    Math.min(reader.pos, size)
   end
 
   # Returns the amount of lines in this buffer.
