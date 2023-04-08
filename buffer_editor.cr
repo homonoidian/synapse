@@ -14,16 +14,16 @@ class BufferEditorState
 
   # Primitive: updates the buffer.
   #
-  # **Unchecked**: may invalidate the state.
-  private def update!(&)
+  # **Unchecked**: may invalidate the state. Make sure to
+  # `seek!` to a valid index afterwards.
+  def update!(&)
     @buffer.update { |string| yield string }
   end
 
-  # Primitive: moves cursor to *index*.
-  #
-  # **Unchecked**: may invalidate the state.
-  private def seek!(index : Int)
-    @cursor = index
+  # Primitive: moves cursor to *index*. Clamps if out of bounds
+  # after update (see `start_index`, `end_index`).
+  def seek!(index : Int)
+    @cursor = index.clamp(start_index..end_index + 1)
   end
 
   # Captures and returns an instant of this state.
@@ -42,46 +42,46 @@ class BufferEditorState
     seek!(index)
   end
 
-  # Returns the amount of characters in the text buffer.
-  def size
-    @buffer.size
-  end
-
-  # Returns the start index of this text buffer.
-  def start
-    0
-  end
-
-  # Returns the end index of this text buffer.
-  def end
-    size - 1
-  end
-
-  # Returns whether the cursor is positioned at the beginning
-  # of the text buffer.
-  def at_start?
-    @cursor == start
-  end
-
-  # Returns whether the cursor is positioned at the end of
-  # the text buffer.
-  def at_end?
-    @cursor == self.end
-  end
-
   # Returns whether to allow insertion of *printable*.
   def insertable?(printable : String)
     true
   end
 
+  # Returns the amount of characters in the text buffer.
+  def size
+    @buffer.size
+  end
+
+  # Returns the index of the first character in this text buffer.
+  def start_index
+    0
+  end
+
+  # Returns the index of the last character in this text buffer.
+  def end_index
+    size - 1
+  end
+
+  # Returns whether the cursor is positioned at the first
+  # character of the text buffer.
+  def at_start_index?
+    @cursor == start_index
+  end
+
+  # Returns whether the cursor is positioned at the last
+  # character of the text buffer.
+  def at_end_index?
+    @cursor == end_index
+  end
+
   # Moves the cursor to the start of the text buffer.
-  def to_start
-    seek!(start)
+  def to_start_index
+    seek!(start_index)
   end
 
   # Moves the cursor to the end of the text buffer.
-  def to_end
-    seek!(self.end)
+  def to_end_index
+    seek!(end_index)
   end
 
   # Finds out what line *index* is part of, and returns that
@@ -107,6 +107,16 @@ class BufferEditorState
     @buffer.fetch_line(line.ord + 1)
   end
 
+  # Returns whether the cursor is at the start of the current line.
+  def at_line_start?
+    @cursor == line.b
+  end
+
+  # Returns whether the cursor is at the end of the current line.
+  def at_line_end?
+    @cursor == line.e
+  end
+
   # Moves the cursor to the start of the current line.
   def to_line_start
     seek(line.b)
@@ -127,7 +137,7 @@ class BufferEditorState
   #
   # Noop if there is no next character or word end.
   def forward(wordstep : Bool = false)
-    return if at_end?
+    return if at_end_index?
 
     seek!(wordstep ? @buffer.word_end_at(@cursor + 1) : @cursor + 1)
   end
@@ -137,7 +147,7 @@ class BufferEditorState
   #
   # Noop if there is no previous character or word start.
   def backward(wordstep : Bool = false)
-    return if at_start?
+    return if at_start_index?
 
     seek!(wordstep ? @buffer.word_begin_at(@cursor - 1) : @cursor - 1)
   end
@@ -184,7 +194,47 @@ class BufferEditorState
     return unless insertable?(string)
 
     update! { string }
-    to_end
+    to_end_index
+  end
+
+  # Returns the string from the start index up to the cursor.
+  # Returns an empty string if the cursor is at the start index.
+  def before_cursor : String
+    return "" if at_start_index?
+
+    @buffer.slice(start_index, @cursor - 1)
+  end
+
+  # **Destructive**: deletes what comes from the start index
+  # up to the cursor.
+  def delete_before_cursor
+    return if at_start_index?
+
+    delete_at(start_index...@cursor)
+  end
+
+  # Returns the string from the cursor up to the end index.
+  # Returns an empty string if the cursor is at the end index.
+  def after_cursor : String
+    return "" if at_end_index?
+
+    @buffer.slice(@cursor, end_index)
+  end
+
+  # **Destructive**: deletes what comes from the start index
+  # up to the cursor.
+  def delete_after_cursor
+    return if at_end_index?
+
+    delete_at(@cursor..end_index)
+  end
+
+  # **Destructive**: clears the text buffer from the start index
+  # to the end index, and moves the cursor to the start index.
+  def clear
+    delete_at(start_index..end_index)
+
+    to_start_index
   end
 
   # Inserts a newline at the cursor. Line indentation before
@@ -194,7 +244,7 @@ class BufferEditorState
     head = String.build do |io|
       io << '\n'
 
-      next if @cursor == line.b
+      next if at_line_start?
       line.each_char do |char|
         break unless char.in?(' ', '\t')
         io << char
@@ -404,10 +454,20 @@ class BufferEditor
 
   # Accepts focus.
   def focus
+    refresh
   end
 
   # Releases focus.
   def blur
+    refresh
+  end
+
+  # **Destructive**: wipes out the content of this editor *and*
+  # the underlying text buffer.
+  def clear
+    @state.clear
+
+    refresh
   end
 
   # Updates editor state based on *event*.

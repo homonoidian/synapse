@@ -116,11 +116,13 @@ class InputField < BufferEditor
   def focus
     @view.active = true
     @focused = true
+    super
   end
 
   def blur
     @view.active = false
     @focused = false
+    super
   end
 
   def handle(event)
