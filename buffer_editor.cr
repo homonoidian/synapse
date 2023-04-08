@@ -7,12 +7,20 @@
 # discrete time steps for change-awareness.
 record BufferEditorInstant, timestamp : Int64, string : String, cursor : Int32
 
-# Wraps some user-friendly editor logic around a `TextBuffer`.
+# Wraps some user-friendly editor logic around a string.
 class BufferEditorState
-  def initialize(@buffer = TextBuffer.new, @cursor = 0)
+  def initialize(value = "", @cursor = 0)
+    @buffer = TextBuffer.new(value)
+  end
+
+  # Returns the string content of this state.
+  def string : String
+    @buffer.string
   end
 
   # Primitive: updates the buffer.
+  #
+  # **Important**: will *always* end in a newline.
   #
   # **Unchecked**: may invalidate the state. Make sure to
   # `seek!` to a valid index afterwards.
@@ -37,7 +45,7 @@ class BufferEditorState
   #
   # Noop if *index* is out of bounds.
   def seek(index : Int)
-    return unless index.in?(0..size)
+    return unless index.in?(start_index..end_index + 1)
 
     seek!(index)
   end
@@ -49,7 +57,7 @@ class BufferEditorState
 
   # Returns the amount of characters in the text buffer.
   def size
-    @buffer.size
+    (end_index + 1) - start_index
   end
 
   # Returns the index of the first character in this text buffer.
@@ -59,7 +67,7 @@ class BufferEditorState
 
   # Returns the index of the last character in this text buffer.
   def end_index
-    size - 1
+    @buffer.size - 1
   end
 
   # Returns whether the cursor is positioned at the first
@@ -289,7 +297,7 @@ class BufferEditorState
     i1 = is_before_cursor ? @buffer.word_begin_at(index) : @buffer.word_end_at(index)
     i2 = index
 
-    return unless i1.in?(0...size) && i2.in?(0...size)
+    return unless i1.in?(start_index..end_index) && i2.in?(start_index..end_index)
 
     b = Math.min(i1, i2)
     e = Math.max(i1, i2)
@@ -304,7 +312,7 @@ class BufferEditorState
   private def delete_char(index : Int32)
     delta = index - @cursor
 
-    return unless index.in?(0...size)
+    return unless index.in?(start_index..end_index)
 
     delete_at(index)
     seek!(@cursor + delta)

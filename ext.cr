@@ -1,3 +1,20 @@
+class SF::Text
+  # Returns the width of this text.
+  def width : Int
+    (global_bounds.width + local_bounds.left).to_i
+  end
+
+  # Returns the height of this text.
+  def height : Int
+    (global_bounds.height + local_bounds.top).to_i
+  end
+
+  # Returns the full width and height of this text.
+  def size
+    SF.vector2f(width, height)
+  end
+end
+
 # Represents a two-dimensional vector.
 struct Vector2
   getter x : Float64

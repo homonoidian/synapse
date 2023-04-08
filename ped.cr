@@ -23,34 +23,36 @@ FONT_ITALIC.get_texture(11).smooth = false
 window = SF::RenderWindow.new(SF::VideoMode.new(800, 600), title: "Protocol Editor")
 window.framerate_limit = 60
 
-def keyword_input(buffer, position)
+def keyword_input(position)
   # TODO: use InputField child instead of exposing state, view
-  state = InputFieldState.new(buffer)
+  state = InputFieldState.new
 
   view = InputFieldView.new
   view.position = position
 
-  {InputField.new(state, view), view, state, buffer}
+  {InputField.new(state, view), view, state}
 end
 
-def param_input(buffer, position)
+def param_input(position)
   # TODO: use InputField child instead of exposing state, view
-  state = InputFieldState.new(buffer)
+  state = InputFieldState.new
 
   view = InputFieldView.new
   view.position = position
 
-  {InputField.new(state, view), view, state, buffer}
+  {InputField.new(state, view), view, state}
 end
 
 focused_field = 0
 
 WS_WIDTH = 6 # FIXME: compute from font
 
+origin = SF.vector2f(100, 100)
+
 fields = [
-  keyword_input(TextBuffer.new, SF.vector2f(100, 100)),
-  param_input(TextBuffer.new, SF.vector2f(160, 100)),
-  param_input(TextBuffer.new, SF.vector2f(200, 100)),
+  keyword_input(origin),
+  param_input(SF.vector2f(160, 100)),
+  param_input(SF.vector2f(200, 100)),
 ]
 fields[focused_field][0].focus
 
@@ -67,7 +69,7 @@ while window.open?
         if to_index >= fields.size
           field = fields[focused_field][1]
           corner = field.position + field.size
-          fields << param_input(TextBuffer.new, SF.vector2f(corner.x + WS_WIDTH, field.position.y))
+          fields << param_input(SF.vector2f(corner.x + WS_WIDTH, field.position.y))
           to_index = fields.size - 1 # clamp
         end
 
@@ -99,11 +101,11 @@ while window.open?
           next unless (from = fields[focused_field][0]).can_blur? # FIXME: use default handler
           next unless (to = fields[to_index][0]).can_focus?       # FIXME: use default handler
 
-          f, _, _, buf = field
+          f, _, state = field
 
           # buffer stores with newline at the end (always), use
           # rchop to omit it
-          curr_string = buf.string.rchop # FIXME: do not use buffer, state may go out of sync
+          curr_string = state.string
 
           # Clear existing field
           f.clear
@@ -115,8 +117,8 @@ while window.open?
           focused_field = to_index
 
           # Append
-          prev_buf = fields[focused_field][3] #  FIXME: do not use buffer, state may go out of sync
-          prev_buf.update { |prev| prev.rchop + curr_string }
+          prev_state = fields[focused_field][2]
+          prev_state.update! { prev_state.string + curr_string }
 
           to.focus
 
@@ -132,11 +134,11 @@ while window.open?
           # wants to focus
           next unless (from = fields[next_index][0]).can_blur? # FIXME: use default handler
 
-          nxt, _, _, next_buf = fields[next_index]
+          nxt, _, next_state = fields[next_index]
 
           # buffer stores with newline at the end (always), use
           # rchop to omit it
-          next_string = next_buf.string.rchop # FIXME: do not use buffer, state may go out of sync
+          next_string = next_state.string
 
           # Clear next field
           nxt.clear
@@ -148,10 +150,10 @@ while window.open?
           # focused field is already = next_index then
 
           # Prepend
-          curr_buf = fields[focused_field][3] # FIXME: do not use buffer, state may go out of sync
+          curr_state = fields[focused_field][2]
           # buffer stores with newline at the end (always), use
           # rchop to omit it
-          curr_buf.update { |curr_string| curr_string.rchop + next_string }
+          curr_state.update! { curr_state.string + next_string }
 
           fields[focused_field][0].refresh
 
@@ -194,14 +196,14 @@ while window.open?
           field = fields[focused_field][1]
           corner = field.position + field.size
           # insert with dummy position
-          fields.insert(ins_index, to = param_input(TextBuffer.new, SF.vector2f(0, 0)))
+          fields.insert(ins_index, to = param_input(SF.vector2f(0, 0)))
           # recompute positions
           fields.each_cons_pair do |(a, av), (b, bv)|
             av_corner = av.position + av.size
             bv.position = SF.vector2f(av_corner.x + WS_WIDTH, av.position.y)
           end
 
-          to, _, to_state, _ = to
+          to, _, to_state = to
 
           if event.shift
             # shift-enter: move before cursor in from_buf to to_buf

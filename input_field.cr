@@ -1,6 +1,10 @@
 # Exactly the same as `BufferEditorState`, but rejects input that
 # contains newlines -- effectively making the buffer single-line.
 class InputFieldState < BufferEditorState
+  def string : String
+    super.chomp
+  end
+
   def insertable?(printable : String)
     printable.each_byte do |byte|
       if byte === '\n' || byte === '\r'
