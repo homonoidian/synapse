@@ -53,8 +53,11 @@ end
 focused_field = 0
 focused_code = false
 
-WS_WIDTH    =  6 # FIXME: compute from font
-LINE_HEIGHT = 14
+WS_WIDTH          =  6 # FIXME: compute from font
+LINE_HEIGHT       = 14
+CODE_INSET_SPACES =  2
+CODE_INSET_X      = WS_WIDTH * CODE_INSET_SPACES
+CODE_MARGIN_Y     = 16
 
 origin = SF.vector2f(100, 100)
 
@@ -63,7 +66,7 @@ fields = [
 ]
 fields[focused_field][0].focus
 
-code_field = code_input(origin + SF.vector2f(WS_WIDTH * 2, LINE_HEIGHT + 4))
+code_field = code_input(origin + SF.vector2f(CODE_INSET_X, LINE_HEIGHT + CODE_MARGIN_Y))
 code_field.blur
 
 while window.open?
@@ -79,7 +82,7 @@ while window.open?
             next unless (from = code_field).can_blur?
 
             # compute column in code
-            code_col = code_field.@state.column + 2
+            code_col = code_field.@state.column + CODE_INSET_SPACES
 
             # go thru fields until all of them are exhausted or
             # code column is found
@@ -131,7 +134,7 @@ while window.open?
           end
 
           col += fields[focused_field][0].@state.column
-          col -= 2
+          col -= CODE_INSET_SPACES
 
           col = Math.min(to.@state.line.size, col)
           to.@state.to_column(col)
@@ -342,10 +345,48 @@ while window.open?
   end
 
   window.clear(SF::Color.new(0x21, 0x21, 0x21))
+
+  padding = SF.vector2f(8, 3)
+  min_code_size = SF.vector2f(128, 64)
+
+  # draw bgrect
+
+  bgrect = SF::RectangleShape.new
+  bgrect.position = origin - padding
+
+  computed_size = SF.vector2f(
+    Math.max(fields.sum(&.[1].size.x) + WS_WIDTH * fields.size, code_field.@view.size.x + WS_WIDTH * CODE_INSET_SPACES*2),
+    fields.max_of(&.[1].size.y) + LINE_HEIGHT + CODE_MARGIN_Y + code_field.@view.size.y
+  ) + padding*2
+  bgrect.outline_thickness = 1
+  bgrect.outline_color = SF::Color.new(0x61, 0x61, 0x61)
+  bgrect.size = SF.vector2f(
+    Math.max(computed_size.x, min_code_size.x),
+    Math.max(computed_size.y, min_code_size.y),
+  )
+
+  bgrect.fill_color = SF::Color.new(0x32, 0x32, 0x32)
+  window.draw(bgrect)
+
   fields.each do |field, _|
     window.draw(field)
   end
+
+  # draw code field rect
+  code_bgrect = SF::RectangleShape.new
+  code_bgrect.position = SF.vector2f(origin.x - padding.x, code_field.@view.position.y - CODE_MARGIN_Y//2)
+  code_bgrect.fill_color = SF::Color.new(0x32, 0x32, 0x32)
+  code_bgrect.size = bgrect.size - SF.vector2f(0, fields.max_of(&.[1].size.y) + CODE_MARGIN_Y + 5)
+  window.draw(code_bgrect)
+
+  sep = SF::RectangleShape.new
+  sep.position = code_bgrect.position - SF.vector2f(0, 2)
+  sep.size = SF.vector2f(bgrect.size.x, 1)
+  sep.fill_color = SF::Color.new(0x61, 0x61, 0x61)
+  window.draw(sep)
+
   window.draw(code_field)
+
   window.display
 end
 
@@ -368,12 +409,27 @@ end
 # TODO: pressing up moves to field "over" the cursor [x]
 # TODO: pressing down moves to character "under" the field + cursor [x]
 #
-# TODO: draw gray-ish (lifted) background rect with focused/blurred gray outline [ ]
-# TODO: draw background rect under buffer editor with sync (ok blue/error red) outline (2 x lifted) [ ]
-# TODO: extract component KeywordRuleEditor, HeartbeatRuleEditor etc. [ ]
+# TODO: draw gray-ish (lifted) background rect outline [x]
+# TODO: draw background rect under buffer with outline (2 x lifted) [x]
+# TODO: draw accept/reject buttons to the left of the background [ ]
+# TODO: alternatively (via a flag), draw green rect to the left of the background [ ]
+# TODO: do not draw buffer if it is empty and the user didn't navigate into it yet [ ]
+#
+# TODO: extract component RuleEditor, KeywordRuleEditor, HeartbeatRuleEditor etc. [ ]
+#       make them take and talk to and edit corresponding rule objects
 # TODO: highlight keyword in different color even when unfocused [ ]
 # TODO: support validation of input fields with red highlight and pointy error [ ]
 #   keyword -- anything
 #   params -- letters followed by symbols
 #   heartbeat time -- digits followed by s or ms
 #
+# TODO: draw multiple RuleEditors in a row [ ]
+# TODO: when Up is pressed at start in ruleeditor, move to the ruleeditor above [ ]
+# TODO: when Down is pressed at end in ruleeditor, move to the ruleeditor below [ ]
+# TODO: there is always an empty rule at the bottom.when it is filled a new empty
+# rule is created below [ ]
+# TODO: extract component ProtocolEditor [ ]
+# TODO: make ProtocolEditor take and talk to and edit Protocol [ ]
+#
+# TODO: merge into app.cr ProtocolEditor (rename what's currently there to CellEditor)[ ]
+# TODO: design considerations [ ]

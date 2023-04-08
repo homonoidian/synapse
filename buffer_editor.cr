@@ -418,7 +418,7 @@ class BufferEditorView
 
   # Returns the margin of the beam inside a line.
   def beam_margin # FIXME: should be private/inline, currently used by ProtocolEditor#draw() for rule headers
-    SF.vector2f(0, @text.character_size * (@text.line_spacing - 1)/2)
+    SF.vector2f(0, Math.max(2, @text.character_size * (@text.line_spacing - 1)/2))
   end
 
   # Returns the position of this view.
