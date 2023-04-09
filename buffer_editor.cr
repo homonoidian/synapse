@@ -167,7 +167,7 @@ class BufferEditorState
   # or word end (*wordstep* is true).
   #
   # Noop if there is no next character or word end.
-  def forward(wordstep : Bool = false)
+  def to_right_bound(wordstep : Bool = false)
     return if at_end_index?
 
     seek!(wordstep ? @buffer.word_end_at(@cursor + 1) : @cursor + 1)
@@ -177,7 +177,7 @@ class BufferEditorState
   # or word start (*wordstep* is true).
   #
   # Noop if there is no previous character or word start.
-  def backward(wordstep : Bool = false)
+  def to_left_bound(wordstep : Bool = false)
     return if at_start_index?
 
     seek!(wordstep ? @buffer.word_begin_at(@cursor - 1) : @cursor - 1)
@@ -185,19 +185,19 @@ class BufferEditorState
 
   # Moves the cursor to the line above, or to the beginning of
   # the current line if there is no line above.
-  def upward
-    line.first? ? to_line_start : upward!
+  def to_line_above
+    line.first? ? to_line_start : to_line_above!
   end
 
   # Moves the cursor to the line below, or to the end of the
   # current line if there is no line below.
-  def downward
-    line.last? ? to_line_end : downward!
+  def to_line_below
+    line.last? ? to_line_end : to_line_below!
   end
 
   # Moves the cursor to the line above. Raises if there is no
   # line above.
-  def upward!
+  def to_line_above!
     above = line_above
 
     seek!(above.b + Math.min(column, above.size))
@@ -205,7 +205,7 @@ class BufferEditorState
 
   # Moves the cursor to the line below. Raises if there is no
   # line below.
-  def downward!
+  def to_line_below!
     below = line_below
 
     seek!(below.b + Math.min(column, below.size))
@@ -459,10 +459,122 @@ end
 
 # An isolated, user-friendly, single-cursor `TextBuffer` editor.
 #
-# * Receives SFML events using `handle`.
+# * Receives and executes high-level `Action`s.
 # * Can be drawn like any other SFML drawable.
 class BufferEditor
   include SF::Drawable
+
+  module Action
+    abstract def do(state)
+  end
+
+  # See `BufferEditorState#delete`.
+  record Action::Delete, wordstep : Bool, translation = 0 do
+    include Action
+
+    def do(state)
+      state.delete(wordstep, translation)
+    end
+  end
+
+  # See `BufferEditorState#insert`.
+  record Action::Insert, printable : String do
+    include Action
+
+    def do(state)
+      state.insert(printable)
+    end
+  end
+
+  # See `BufferEditorState#newline`.
+  record Action::InsertNewline do
+    include Action
+
+    def do(state)
+      state.newline
+    end
+  end
+
+  # See `BufferEditorState#indent`.
+  record Action::InsertIndent do
+    include Action
+
+    def do(state)
+      state.indent
+    end
+  end
+
+  # See `BufferEditorState#to_left_bound`.
+  record Action::ToLeftBound, wordstep : Bool do
+    include Action
+
+    def do(state)
+      state.to_left_bound(wordstep)
+    end
+  end
+
+  # See `BufferEditorState#to_right_bound`.
+  record Action::ToRightBound, wordstep : Bool do
+    include Action
+
+    def do(state)
+      state.to_right_bound(wordstep)
+    end
+  end
+
+  # See `BufferEditorState#to_line_above`.
+  record Action::ToLineAbove do
+    include Action
+
+    def do(state)
+      state.to_line_above
+    end
+  end
+
+  # See `BufferEditorState#to_line_below`.
+  record Action::ToLineBelow do
+    include Action
+
+    def do(state)
+      state.to_line_below
+    end
+  end
+
+  # See `BufferEditorState#to_line_start`.
+  record Action::ToLineStart do
+    include Action
+
+    def do(state)
+      state.to_line_start
+    end
+  end
+
+  # See `BufferEditorState#to_line_end`.
+  record Action::ToLineEnd do
+    include Action
+
+    def do(state)
+      state.to_line_end
+    end
+  end
+
+  # See `BufferEditorState#to_clipboard`.
+  record Action::ToClipboard do
+    include Action
+
+    def do(state)
+      state.to_clipboard
+    end
+  end
+
+  # See `BufferEditorState#from_clipboard`.
+  record Action::FromClipboard do
+    include Action
+
+    def do(state)
+      state.from_clipboard
+    end
+  end
 
   # Returns whether this editor is focused.
   getter? focused : Bool
@@ -510,54 +622,17 @@ class BufferEditor
     refresh
   end
 
-  # Updates editor state based on *event*.
-  def handle(event : SF::Event::KeyPressed)
-    return unless focused?
-
-    case event.code
-    when .backspace? then @state.delete(wordstep: event.control, translation: -1)
-    when .delete?    then @state.delete(wordstep: event.control)
-    when .enter?     then @state.newline
-    when .tab?       then @state.indent
-    when .left?      then @state.backward(wordstep: event.control)
-    when .right?     then @state.forward(wordstep: event.control)
-    when .home?      then @state.to_line_start
-    when .end?       then @state.to_line_end
-    when .up?        then @state.upward
-    when .down?      then @state.downward
-    when .c?
-      return unless event.control
-
-      @state.to_clipboard
-    when .v?
-      return unless event.control
-
-      @state.from_clipboard
-    else
-      return
-    end
+  # Updates editor state using *action*.
+  def execute(action : Action)
+    action.do(@state)
 
     refresh
-  end
-
-  # :ditto:
-  def handle(event : SF::Event::TextEntered)
-    return unless focused?
-
-    chr = event.unicode.chr
-
-    return unless chr.printable?
-
-    @state.insert(chr)
-
-    refresh
-  end
-
-  # :ditto:
-  def handle(event)
   end
 
   def draw(target, states)
     @view.draw(target, states)
   end
 end
+
+# TODO: Actions should be objects, not values [ ]
+# TODO: Action#prepare [ ] -> Action#do [x] -> Action#undo [ ]

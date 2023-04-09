@@ -1142,8 +1142,63 @@ class ProtocolEditor
     markers[marker.offset] = marker
   end
 
+  # hack to get it working. this should be managed by the event/
+  # focus system
+  def editor_handle(buf, event : SF::Event::KeyPressed)
+    return unless buf.focused?
+
+    case event.code
+    when .delete?
+      action = BufferEditor::Action::Delete.new(wordstep: event.control)
+    when .backspace?
+      action = BufferEditor::Action::Delete.new(wordstep: event.control, translation: -1)
+    when .enter?
+      action = BufferEditor::Action::InsertNewline.new
+    when .tab?
+      action = BufferEditor::Action::InsertIndent.new
+    when .left?
+      action = BufferEditor::Action::ToLeftBound.new(wordstep: event.control)
+    when .right?
+      action = BufferEditor::Action::ToRightBound.new(wordstep: event.control)
+    when .up?
+      action = BufferEditor::Action::ToLineAbove.new
+    when .down?
+      action = BufferEditor::Action::ToLineBelow.new
+    when .home?
+      action = BufferEditor::Action::ToLineStart.new
+    when .end?
+      action = BufferEditor::Action::ToLineEnd.new
+    when .c?
+      return unless event.control
+
+      action = BufferEditor::Action::ToClipboard.new
+    when .v?
+      return unless event.control
+
+      action = BufferEditor::Action::FromClipboard.new
+    else
+      return
+    end
+
+    buf.execute(action)
+  end
+
+  def editor_handle(buf, event : SF::Event::TextEntered)
+    return unless buf.focused?
+
+    chr = event.unicode.chr
+
+    return unless chr.printable?
+
+    action = BufferEditor::Action::Insert.new(chr.to_s)
+    buf.execute(action)
+  end
+
+  def editor_handle(buf, event)
+  end
+
   def handle(event)
-    update { @editor.handle(event) }
+    update { editor_handle(@editor, event) }
   end
 
   def rules_in(source : String)

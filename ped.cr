@@ -50,6 +50,61 @@ def code_input(position)
   BufferEditor.new(BufferEditorState.new, view)
 end
 
+# hack to get it working. this should be managed by the event/
+# focus system
+def handle(buf, event : SF::Event::KeyPressed)
+  return unless buf.focused?
+
+  case event.code
+  when .delete?
+    action = BufferEditor::Action::Delete.new(wordstep: event.control)
+  when .backspace?
+    action = BufferEditor::Action::Delete.new(wordstep: event.control, translation: -1)
+  when .enter?
+    action = BufferEditor::Action::InsertNewline.new
+  when .tab?
+    action = BufferEditor::Action::InsertIndent.new
+  when .left?
+    action = BufferEditor::Action::ToLeftBound.new(wordstep: event.control)
+  when .right?
+    action = BufferEditor::Action::ToRightBound.new(wordstep: event.control)
+  when .up?
+    action = BufferEditor::Action::ToLineAbove.new
+  when .down?
+    action = BufferEditor::Action::ToLineBelow.new
+  when .home?
+    action = BufferEditor::Action::ToLineStart.new
+  when .end?
+    action = BufferEditor::Action::ToLineEnd.new
+  when .c?
+    return unless event.control
+
+    action = BufferEditor::Action::ToClipboard.new
+  when .v?
+    return unless event.control
+
+    action = BufferEditor::Action::FromClipboard.new
+  else
+    return
+  end
+
+  buf.execute(action)
+end
+
+def handle(buf, event : SF::Event::TextEntered)
+  return unless buf.focused?
+
+  chr = event.unicode.chr
+
+  return unless chr.printable?
+
+  action = BufferEditor::Action::Insert.new(chr.to_s)
+  buf.execute(action)
+end
+
+def handle(buf, event)
+end
+
 focused_field = 0
 focused_code = false
 
@@ -334,9 +389,9 @@ while window.open?
     end
 
     if focused_code
-      code_field.handle(event)
+      handle(code_field, event)
     else
-      fields[focused_field][0].handle(event)
+      handle(fields[focused_field][0], event)
       fields.each_cons_pair do |(a, av), (b, bv)|
         av_corner = av.position + av.size
         bv.position = SF.vector2f(av_corner.x + WS_WIDTH, bv.position.y)
