@@ -526,6 +526,7 @@ class MessageResponseContext < ResponseContext
   def fill(stack : Lua::Stack)
     super
 
+    stack.set_global("keyword", @message.keyword)
     stack.set_global("sender", @message.sender.to_s)
     stack.set_global("impact", @message.strength)
     stack.set_global("decay", @message.decay)
@@ -1099,13 +1100,17 @@ class ProtocolEditor
     initialize(cell, other.state)
   end
 
-  # private delegate :cursor, :cursor=, to: @state     # TODO: remove
-  # private delegate :buffer, :buffer=, to: @state     # TODO: remove
-  private delegate :protocol, :protocol=, to: @state # TODO: remove
-  private delegate :markers, :markers=, to: @state   # TODO: remove
-  private delegate :sync?, :sync=, to: @state        # TODO: remove
+  # TODO: remove
+  private delegate :protocol, :protocol=, to: @state
+  # TODO: remove
+  private delegate :markers, :markers=, to: @state
+  # TODO: remove
+  private delegate :sync?, :sync=, to: @state
 
-  def refresh # FIXME: wtf?
+  # Editor needs to be refreshed when protocoleditor is focused
+  # because other cells that have the same protocol (copies) may
+  # have altered it.
+  def refresh
     @editor.refresh
   end
 
@@ -1869,6 +1874,8 @@ class Tank
 
     @inspecting = other if ok
 
+    other ? App.the.stop_time : App.the.start_time
+
     other
   end
 
@@ -2184,6 +2191,10 @@ class Mode::Normal < Mode
     app.follow unless @elevated
   end
 
+  def try_inspect(app, cell)
+    app.tank.inspect(cell)
+  end
+
   @clicks = 0
   @prev_button : SF::Mouse::Button?
   @clickclock : SF::Clock? = nil
@@ -2204,7 +2215,7 @@ class Mode::Normal < Mode
     cc = @clickclock ||= SF::Clock.new
     cc.restart
 
-    if @mouse.in?(app.console) || app.console.elevated?
+    if @mouse_in_tank.in?(app.console) || app.console.elevated?
       app.console.handle(event, clicks: @clicks)
       return self
     end
@@ -2222,7 +2233,7 @@ class Mode::Normal < Mode
         return super
       end
       @elevated = cell
-      app.tank.inspect(cell)
+      try_inspect(app, cell)
     when .right?
       app.tank.distribute(coords, Message.new(
         id: UUID.random,
@@ -2237,7 +2248,7 @@ class Mode::Normal < Mode
   end
 
   def map(app, event : SF::Event::MouseButtonReleased)
-    if @elevated.nil? && (@mouse.in?(app.console) || app.console.elevated?)
+    if @elevated.nil? && (@mouse_in_tank.in?(app.console) || app.console.elevated?)
       app.console.handle(event)
       return self
     end
@@ -2251,7 +2262,7 @@ class Mode::Normal < Mode
   def map(app, event : SF::Event::MouseMoved)
     super
 
-    if @elevated.nil? && (@mouse.in?(app.console) || app.console.elevated?)
+    if @elevated.nil? && (@mouse_in_tank.in?(app.console) || app.console.elevated?)
       app.console.handle(event)
       return self
     end
@@ -2264,7 +2275,7 @@ class Mode::Normal < Mode
   end
 
   def map(app, event : SF::Event::MouseWheelScrolled)
-    if @mouse.in?(app.console) || app.console.elevated?
+    if @mouse_in_tank.in?(app.console) || app.console.elevated?
       app.console.handle(event)
       return self
     end
@@ -2280,7 +2291,7 @@ class Mode::Normal < Mode
     return super unless (chr = event.unicode.chr).alphanumeric?
 
     cell = app.tank.cell to: @mouse_in_tank
-    app.tank.inspect(cell)
+    try_inspect(app, cell)
 
     super
   end
@@ -2292,7 +2303,7 @@ class Mode::Normal < Mode
     when .l_shift?, .r_shift?
       return Mode::Shift.new(WireConfig.new)
     when .escape?
-      app.tank.inspect(nil)
+      try_inspect(app, nil)
     when .delete?, .backspace?
       if app.tank.inspecting?(nil)
         return Mode::Slaying.new
@@ -2596,12 +2607,13 @@ class Console
   end
 
   def handle(event : SF::Event::MouseButtonPressed, clicks : Int32)
+    mpos = App.the.coords(event).sf
     if clicks == 2
       self.folded = !@folded
       @folded_manually = true
     else
       @elevated = true
-      @pressed_at = SF.vector2f(event.x, event.y)
+      @pressed_at = mpos
     end
   end
 
@@ -2611,9 +2623,11 @@ class Console
 
   def handle(event : SF::Event::MouseMoved)
     return unless @elevated
-    move(SF.vector2f(event.x, event.y) - @pressed_at)
+    mpos = App.the.coords(event).sf
 
-    @pressed_at = SF.vector2f(event.x, event.y)
+    move(mpos - @pressed_at)
+
+    @pressed_at = mpos
   end
 
   def handle(event)
@@ -2811,6 +2825,20 @@ class App
 
   @time = true
 
+  def stop_time
+    return unless @time
+
+    @time = false
+  end
+
+  def start_time
+    return if @time
+
+    @time = true
+
+    App.time.unpause
+  end
+
   def toggle_time
     @time = !@time
     if @time
@@ -2825,6 +2853,8 @@ class App
     @editor.clear(SF::Color.new(0x21, 0x21, 0x21, 0xff))
     @tank.draw(:entities, @editor)
     @tank.draw(:actors, @scene_window)
+    # Draw console window...
+    @console.draw(self, @editor)
     @editor.display
 
     #
@@ -2832,15 +2862,12 @@ class App
     #
     @hud.clear(SF::Color.new(0x21, 0x21, 0x21, 0))
 
-    # Draw console window...
-    @console.draw(self, @hud)
-
     # Draw whatever mode wants to draw...
     @mode.draw(self, @hud)
 
     # Optionally draw "time is paused" window
     unless @time
-      text = SF::Text.new("Time is paused... Press Space to unpause", FONT_UI, 14)
+      text = SF::Text.new("Time is paused...", FONT_UI_MEDIUM, 14)
       text.fill_color = SF::Color.new(0x99, 0x99, 0x99)
       text_size = SF.vector2f(
         text.global_bounds.width + text.local_bounds.left,
@@ -2979,19 +3006,23 @@ end
 # [x] add '*' wildcard message
 # [x] introduce clock authority which will control clocks for heartbeats &
 #     timetables, and make the clocks react to toggle time
+# [x] stop_time on inspect
+# [x] draw console in tank
+# [x] expose keyword in messageresponsecontext
 # [ ] support clone using C-Middrag
 # [ ] wormhole wire -- listen at both ends, teleport to the opposite end
 #     represented by two circles "regions" at both ends connected by a 1px line
 # [ ] add "sink" messages which store the last received message
 #     and answer after N millis
-# [ ] refactor event+mode system to use smaller handlers & have better focus
+# [ ] -refactor- WIPE OUT event+mode system. use something simple eg event
+#     streams; have better focus (mouse follows focus but some things e.g.
+#     editor can seize it)
 # [ ] add selection rectangle (c-shift mode) to drag/copy/clone/delete multiple entities
 #     selection rectangle :: to select new things
 #     selection :: contains new and previously selected things
-# [ ] use a dialect of Lisp instead of Lua
-# [ ] make it possible for cells to send each other definitions and
-#     pieces of code. given it's Lisp, that should be either free or
-#     pretty straight-forward
+# [ ] add message reflection (get/set name, get/set parameters, get/set sink, get/set code etc)
+# [ ] make it possible for cells to send each other definitions
+# [ ] make it possible for cells to send each other pieces of code
 # [ ] extend the notion of *actors*: allow cells to own actors in Scene
 #     and move/resize/fill/control them.
 # [ ] add drawableallocator object pool to reuse shapes instead of reallocating
