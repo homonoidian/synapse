@@ -66,14 +66,43 @@ struct Vector2
     (@x / other).at(@y / other)
   end
 
+  # Divides this vector's components by *other*'s components.
+  def /(other : Vector2)
+    (@x / other.x).at(@y / other.y)
+  end
+
   # Returns the angle of this vector from origin.
   def angle
     Math.atan2(@y, @x)
   end
 
+  # Returns the magnitude of this vector.
+  def magn
+    Math.sqrt(@x ** 2 + @y ** 2)
+  end
+
   # Componentwise max() with *other*.
   def max(other : Vector2)
     Math.max(@x, other.x).at(Math.max(@y, other.y))
+  end
+
+  # Rotates this vector by *degrees*.
+  def rotate(degrees)
+    radians = Math.radians(degrees)
+
+    Vector2.new(
+      @x * Math.cos(radians) - @y * Math.sin(radians),
+      @y * Math.sin(radians) + @y * Math.cos(radians)
+    )
+  end
+
+  # Returns whether both of the components are zero.
+  def zero?
+    @x.zero? && @y.zero?
+  end
+
+  def <(other : Vector2)
+    @x < other.x || @y < other.y
   end
 
   # Returns the components of this vector in a tuple.

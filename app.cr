@@ -10,6 +10,7 @@ require "chipmunk"
 require "chipmunk/chipmunk_crsfml"
 require "colorize"
 require "string_scanner"
+require "open-simplex-noise"
 
 require "./ext"
 require "./line"
@@ -66,6 +67,24 @@ def fmessage_lifespan_ms_to_strength(lifespan_ms : Float)
     100 * Math.log(lifespan_ms - 146)
   else
     Math::E**(lifespan_ms/190)
+  end
+end
+
+def fmagn_to_flow_scale(magn : Float)
+  if 3.684 <= magn
+    50/magn
+  elsif magn > 0
+    magn**2
+  else
+    0
+  end
+end
+
+def fmessage_strength_to_jitter(strength : Float)
+  if strength.in?(0.0..1000.0)
+    1 - (1/1000 * strength**2)/1000
+  else
+    0.0
   end
 end
 
@@ -226,6 +245,19 @@ abstract class PhysicalEntity < Entity
     @drawable.position = (mid - @shape.radius).sf
   end
 
+  # Returns a sample [0; 1] from this cell's entropy device.
+  def entropy
+    return 0.0 if @tanks.empty?
+
+    mean = 0.0
+
+    @tanks.each do |tank|
+      mean += tank.entropy(mid)
+    end
+
+    mean / @tanks.size
+  end
+
   def smack(other : Entity, in tank : Tank)
   end
 end
@@ -251,6 +283,51 @@ class RoundEntity < PhysicalEntity
     drawable
   end
 
+  ANGLES = (0..12).map { |n| n * 30 }
+
+  # jitter: willingness to change elevation [0; 1]
+  property jitter = 0.0
+
+  # Amount of jitter ascent (0.0 = descent, 1.0 = ascent).
+  property jascent = 0.0
+
+  def tick(delta : Float, in tank : Tank)
+    super
+
+    return if @jitter.zero?
+
+    min_hdg = ANGLES.min_by { |angle| tank.entropy(mid + self.class.radius + angle.dir * self.class.radius) }
+    max_hdg = ANGLES.max_by { |angle| tank.entropy(mid + self.class.radius + angle.dir * self.class.radius) }
+
+    #
+    # Compute weighed mean to get heading
+    #
+    ascent_w = @jascent
+    descent_w = 1 - @jascent
+
+    sines = 0
+    cosines = 0
+
+    sines += ascent_w * Math.sin(Math.radians(max_hdg))
+    cosines += ascent_w * Math.cos(Math.radians(max_hdg))
+
+    sines += descent_w * Math.sin(Math.radians(min_hdg))
+    cosines += descent_w * Math.cos(Math.radians(min_hdg))
+
+    heading = Math.degrees(Math.atan2(sines, cosines))
+
+    #
+    # Compute flow vector and flow scale.
+    #
+
+    flow_vec = heading.dir
+    flow_scale = fmagn_to_flow_scale(velocity.zero? ? 10 * @jitter : velocity.magn)
+    flow_scale_max = 13.572
+    flow_scale_norm = flow_scale / flow_scale_max
+
+    @body.velocity += (flow_vec * flow_scale).cp * @jitter
+  end
+
   def self.radius
     4
   end
@@ -273,8 +350,12 @@ class Vesicle < RoundEntity
     1
   end
 
+  def decay
+    @tt.progress(@decay_task_id)
+  end
+
   def message
-    @message.copy_with(decay: @tt.progress(@decay_task_id))
+    @message.copy_with(decay: decay)
   end
 
   delegate :keyword, to: @message
@@ -299,6 +380,12 @@ class Vesicle < RoundEntity
     1.0
   end
 
+  def tick(delta : Float, in tank : Tank)
+    @jitter = fmessage_strength_to_jitter(@message.strength * (1 - decay))
+
+    super
+  end
+
   def smack(other : Cell, in tank : Tank)
     other.receive(self, tank)
   end
@@ -319,6 +406,7 @@ end
 class ResponseContext
   def initialize(@receiver : Cell)
     @strength = 120.0
+    @random = Random::PCG32.new(Time.local.to_unix.to_u64!)
   end
 
   # Computes *heading angle* (in degrees) from a list of angles
@@ -445,6 +533,105 @@ class ResponseContext
     1
   end
 
+  # Assigns the jitter [0;1] of this cell and/or returns it.
+  #
+  # The following is not how jitter and entropy in general
+  # are implemented but rather how it should be imagined.
+  #
+  # Cells "float" in an environment called *tank*. Tank features
+  # a landscape of higher and lower elevation (*entropy*).
+  # *jitter* determines how eagerly (and whether at all)
+  # a cell must descend or ascend this landscape.
+  #
+  # Note that at high velocities even a high jitter won't
+  # matter much. However, when entities slow down, jitter starts
+  # to play a role in their motion.
+  #
+  # Vesicles with lower strength climb the landscape down. Their
+  # jitter is calculated using a formula as they decay,
+  # and cannot be set or known ahead of time.
+  #
+  # Synopsis:
+  #
+  # * `jitter() : number`
+  # * `jitter(newJitter : number) : number`
+  def jitter(state : LibLua::State)
+    stack = Lua::Stack.new(state, :all)
+
+    if stack.size == 1
+      unless (jitter = stack.pop.as?(Float64)) && jitter.in?(0.0..1.0)
+        raise Lua::RuntimeError.new("jitter(newJitter): newJitter must be a number in [0; 1]")
+      end
+
+      @receiver.jitter = jitter
+    end
+
+    stack << @receiver.jitter
+
+    1
+  end
+
+  # Samples entropy using the *entropy device*.
+  #
+  # The *entropy device* is one of the several abstract devices
+  # cells use to "probe" the environment. Some other devices
+  # include the *attack device*, *decay device*, and the
+  # *evasion* device.
+  #
+  # Note that because the same cell may be present in multiple
+  # tanks simultaneously, the sample from the *entropy device*
+  # is a mean of samples from all tanks.
+  #
+  # Synopsis:
+  #
+  # * `entropy() : number`
+  def entropy(state : LibLua::State)
+    stack = Lua::Stack.new(state, :all)
+    stack << @receiver.entropy
+
+    1
+  end
+
+  # Assigns or returns the ascent factor [0; 1] of this cell.
+  #
+  # Ascent factor determines whether this cell should *descend*
+  # (ascent factor is `0.0`) or descend (ascent factor is `1.0`)
+  # in the tank landscape during jitter. Values in-between are
+  # obtained via weighted circular mean.
+  #
+  # Synopsis:
+  #
+  # * `ascent() : number`
+  # * `ascent(newAscent : number) : number`
+  def ascent(state : LibLua::State)
+    stack = Lua::Stack.new(state, :all)
+
+    if stack.size == 1
+      unless (ascent = stack.pop.as?(Float64)) && ascent.in?(0.0..1.0)
+        raise Lua::RuntimeError.new("ascent(newAscent): newAscent must be a number in [0; 1]")
+      end
+
+      @receiver.jascent = ascent
+    end
+
+    stack << @receiver.jascent
+
+    1
+  end
+
+  # Generates a random number using a unique, freshly seeded
+  # random number generator.
+  #
+  # Synopsis:
+  #
+  # * `rand() : number`
+  def rand(state : LibLua::State)
+    stack = Lua::Stack.new(state, :all)
+    stack << @random.rand
+
+    1
+  end
+
   # Terminates message handling and makes the receiver cell
   # commit suicide. No return.
   #
@@ -534,10 +721,13 @@ class ResponseContext
   # Populates *stack* with globals related to this response context.
   def fill(stack : Lua::Stack)
     stack.set_global("self", @receiver.memory)
-    stack.set_global("id", @receiver.id.to_s)
     stack.set_global("heading", ->heading(LibLua::State))
     stack.set_global("strength", ->strength(LibLua::State))
     # TODO: set lifespan manually or use strength->lifespan formula
+    stack.set_global("jitter", ->jitter(LibLua::State))
+    stack.set_global("entropy", ->entropy(LibLua::State))
+    stack.set_global("ascent", ->ascent(LibLua::State))
+    stack.set_global("rand", ->rand(LibLua::State))
     stack.set_global("replicate", ->replicate(LibLua::State))
     stack.set_global("die", ->die(LibLua::State))
     stack.set_global("send", ->send(LibLua::State))
@@ -555,7 +745,6 @@ class MessageResponseContext < ResponseContext
     super
 
     stack.set_global("keyword", @message.keyword)
-    stack.set_global("sender", @message.sender.to_s)
     stack.set_global("impact", @message.strength)
     stack.set_global("decay", @message.decay)
 
@@ -1755,7 +1944,7 @@ end
 
 class Vein < PhysicalEntity
   def initialize
-    super(SF::Color.new(0x61, 0x61, 0x61), lifespan: nil)
+    super(SF::Color.new(0xE5, 0x73, 0x73, 0x33), lifespan: nil)
   end
 
   def self.body
@@ -1881,6 +2070,7 @@ class Tank
   end
 
   @inspecting : Inspectable?
+  @scatterer : UUID
 
   def initialize
     @space = CP::Space.new
@@ -1891,11 +2081,27 @@ class Tank
     @entities = {} of UUID => Entity
     @actors = [] of Actor
 
+    @entropy = OpenSimplexNoise.new
+    @stime = 1i64
+
     @tt = TimeTable.new(App.time)
+
+    # Generate milliseconds between 0..2000 based on turbulence.
+    @scatterer = @tt.every(((1 - self.class.turbulence) * 2000).milliseconds) do
+      @stime += 1
+    end
 
     dispatcher = TankDispatcher.new(self)
 
     @space.add_collision_handler(dispatcher)
+  end
+
+  # Turbulence factor [0; 1] determines how often entropy
+  # time is incremented, which in turn advances the entropy
+  # noise. That is, entities will entropy in a slightly different
+  # direction at the same position.
+  def self.turbulence
+    0.4
   end
 
   def inspecting?(object : Inspectable?)
@@ -1920,6 +2126,10 @@ class Tank
     other ? App.the.stop_time : App.the.start_time
 
     other
+  end
+
+  def entropy(at pos : Vector2)
+    @entropy.generate(pos.x/100, pos.y/100, @stime/10) * 0.5 + 0.5
   end
 
   def prn(cell : Cell, message : String)
@@ -2096,6 +2306,12 @@ class Tank
     # dd.draw(@space)
   end
 
+  JCIRC = SF::CircleShape.new(point_count: 10)
+
+  @emap = SF::RenderTexture.new
+  @emap_hash : UInt64?
+  @emap_time = 0
+
   def draw(what : Symbol, target : SF::RenderTarget)
     case what
     when :entities
@@ -2114,6 +2330,61 @@ class Tank
       @inspecting.try &.draw(self, target)
 
       target.draw(self)
+    when :entropy
+      #
+      # Draw jitter map for the visible area: small circles
+      # with hue based on jitter and vertices pointing out
+      # towards jitter * 360.
+      #
+      view = target.view
+
+      top_left = view.center - SF.vector2f(view.size.x/2, view.size.y/2)
+      bot_right = top_left + view.size
+      extent = bot_right - top_left
+
+      emap_hash = {top_left, bot_right}.hash
+
+      # Do not draw if extent is the same and time is the same.
+      unless emap_hash == @emap_hash && @stime == @emap_time
+        unless emap_hash == @emap_hash
+          # Recreate emap texture if size changed. Become the
+          # same size as target.
+          @emap.create(extent.x.to_i, extent.y.to_i, settings: SF::ContextSettings.new(depth: 24, antialiasing: 8))
+        end
+
+        @emap_hash = emap_hash
+        @emap_time = @stime
+
+        # View the same region as target.
+        @emap.view = view
+        @emap.clear(SF::Color.new(0x21, 0x21, 0x21, 0))
+
+        step = 12.at(12)
+
+        vectors = [] of SF::Vertex
+
+        top_left.y.step(to: bot_right.y, by: step.y) do |y|
+          top_left.x.step(to: bot_right.x, by: step.x) do |x|
+            jrect_origin = x.at(y)
+            jrect_mid = jrect_origin + step/2
+
+            sample = entropy(jrect_mid)
+            fill = SF::Color.new(*LCH.lch2rgb(l = sample * 30 + 10, 0, 0))
+            next if l <= 12
+
+            JCIRC.position = jrect_origin.sf
+            JCIRC.radius = (step.x/2 - 1) * sample + 1
+            JCIRC.fill_color = fill
+            @emap.draw(JCIRC)
+          end
+        end
+
+        @emap.display
+      end
+
+      sprite = SF::Sprite.new(@emap.texture)
+      sprite.position = top_left
+      target.draw(sprite)
     when :actors
       each_actor { |actor| target.draw(actor) }
     end
@@ -2518,6 +2789,17 @@ class Mode::Ctrl < Mode
     Mode::Normal.new
   end
 
+  def map(app, event : SF::Event::KeyPressed)
+    case event.code
+    when .j?
+      App.the.heightmap = !App.the.heightmap?
+    else
+      return super
+    end
+
+    self
+  end
+
   def map(app, event : SF::Event::MouseButtonPressed)
     case event.button
     when .left?
@@ -2752,6 +3034,8 @@ class App
   getter tank : Tank
   getter console : Console
 
+  property? heightmap = false
+
   @mode : Mode
 
   private def mode=(other : Mode)
@@ -2894,6 +3178,7 @@ class App
     # Draw tank.
     #
     @editor.clear(SF::Color.new(0x21, 0x21, 0x21, 0xff))
+    @tank.draw(:entropy, @editor) if heightmap?
     @tank.draw(:entities, @editor)
     @tank.draw(:actors, @scene_window)
     # Draw console window...
@@ -3054,6 +3339,12 @@ end
 # [x] expose keyword in messageresponsecontext
 # [x] add die() to kill current cell programmatically
 # [x] add replicate() to copy cell programmaticaly
+# [x] introduce "entropy": every entity samples 3d noise (x, y, time) to
+#     get a "jitter" value.
+# [x] introduce the entropy device; set jitter using jitter()
+# [x] read entropy using entropy()
+# [x] add visualization for "entropy"; toggle on C-j
+# [x] introduce ascend() to select whether a cell should climb up/down
 # [ ] support clone using C-Middrag
 # [ ] wormhole wire -- listen at both ends, teleport to the opposite end
 #     represented by two circles "regions" at both ends connected by a 1px line

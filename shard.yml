@@ -17,11 +17,16 @@ dependencies:
   lua:
     github: veelenga/lua.cr
     commit: e48a298
+  open-simplex-noise:
+    github: j8r/crystal-open-simplex-noise
+
 #   pg:
 #     github: will/crystal-pg
 #     version: "~> 0.5"
 
-# development_dependencies:
+development_dependencies:
+  minitest:
+    github: ysbaddaden/minitest.cr
 #   webmock:
 #     github: manastech/webmock.cr
 

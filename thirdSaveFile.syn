@@ -1,21 +1,20 @@
+jitter(0.7)
+
 self.waitingForPong = false
 
 mouse |
   replicate()
 
-heartbeat 1s |
-  swim(math.random() * 360, math.random() * 70)
-
 heartbeat 500ms |
-  strength(20)
+  strength(10)
   send("ping")
 
 heartbeat 5s |
-  if math.random() < 0.4 then
+  if rand() < 0.1 then
     replicate()
   end
 
-heartbeat 3s |
+heartbeat 1500ms |
   if self.waitingForPong == true then
     die()
   end

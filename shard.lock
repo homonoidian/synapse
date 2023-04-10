@@ -16,3 +16,11 @@ shards:
     git: https://github.com/veelenga/lua.cr.git
     version: 0.2.0+git.commit.e48a298223daf53e1badc58a1794f7d5e3738805
 
+  minitest:
+    git: https://github.com/ysbaddaden/minitest.cr.git
+    version: 1.1.0
+
+  open-simplex-noise:
+    git: https://github.com/j8r/crystal-open-simplex-noise.git
+    version: 1.1.0
+
