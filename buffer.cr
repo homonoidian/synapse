@@ -53,7 +53,7 @@ class TextBuffer
     end
 
     if start <= @string.size || @string.empty?
-      line = Line.new(self, lineno, start, @string.size)
+      line = Line.new(self, lineno, start, @string.size) # FIXME: bug! move to exclusive line end index!
 
       if lineno < lines
         @lines[lineno] = line

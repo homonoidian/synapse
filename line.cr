@@ -29,6 +29,8 @@ struct Line
 
   # Yields each character in this line.
   def each_char
+    e = self.e.clamp(0..@buf.size - 1) # FIXME: bug: use exlusive line end index
+
     b.upto(e) do |index|
       yield @buf[index]
     end
