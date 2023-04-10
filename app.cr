@@ -3256,11 +3256,10 @@ class App
         end
       end
 
-      while event = @scene_window.poll_event
+      while @scene_window.open? && (event = @scene_window.poll_event)
         case event
         when SF::Event::Closed
           @scene_window.close
-          @editor_window.close
         when SF::Event::KeyPressed
           @tank.each_vein &.emit("key", [event.code.to_s] of Memorable, color: Cell.color(l: 80, c: 70))
         when SF::Event::TextEntered
