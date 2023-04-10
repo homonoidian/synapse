@@ -1,0 +1,28 @@
+self.waitingForPong = false
+
+mouse |
+  replicate()
+
+heartbeat 1s |
+  swim(math.random() * 360, math.random() * 70)
+
+heartbeat 500ms |
+  strength(20)
+  send("ping")
+
+heartbeat 5s |
+  if math.random() < 0.4 then
+    replicate()
+  end
+
+heartbeat 3s |
+  if self.waitingForPong == true then
+    die()
+  end
+  self.waitingForPong = true
+
+ping |
+  send("pong")
+
+pong |
+  self.waitingForPong = false

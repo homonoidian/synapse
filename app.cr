@@ -313,6 +313,9 @@ record ErrResult < EvalResult, error : Lua::LuaError | ArgumentError, rule : Rul
   end
 end
 
+class CommitSuicide < Exception
+end
+
 class ResponseContext
   def initialize(@receiver : Cell)
     @strength = 120.0
@@ -442,6 +445,29 @@ class ResponseContext
     1
   end
 
+  # Terminates message handling and makes the receiver cell
+  # commit suicide. No return.
+  #
+  # Synopsis:
+  #
+  # * `die()`
+  def die(state : LibLua::State)
+    # Longjump (sort of) to Cell#receive, systole(), dyastole(),
+    # and friends.
+    raise CommitSuicide.new
+
+    1
+  end
+
+  # Summons a shallow copy (aka relative) of this cell.
+  #
+  # Relatives share their protocol but not instance memory.
+  def replicate(state : LibLua::State)
+    @receiver.replicate
+
+    1
+  end
+
   # Emits a message at the receiver. Strength can be assigned/
   # retrieved using `setStrength/getStength`.
   #
@@ -512,6 +538,8 @@ class ResponseContext
     stack.set_global("heading", ->heading(LibLua::State))
     stack.set_global("strength", ->strength(LibLua::State))
     # TODO: set lifespan manually or use strength->lifespan formula
+    stack.set_global("replicate", ->replicate(LibLua::State))
+    stack.set_global("die", ->die(LibLua::State))
     stack.set_global("send", ->send(LibLua::State))
     stack.set_global("swim", ->swim(LibLua::State))
     stack.set_global("print", ->print(LibLua::State))
@@ -1618,6 +1646,15 @@ class Cell < RoundEntity
     end
   end
 
+  def replicate
+    replica = copy
+    replica.mid = mid
+
+    @tanks.each do |tank|
+      replica.summon(in: tank)
+    end
+  end
+
   def summon(*, in tank : Tank)
     super
     @protocol.born(self)
@@ -1639,6 +1676,8 @@ class Cell < RoundEntity
 
     @handled << vesicle.message.id
     @protocol.answer(receiver: self, vesicle: vesicle)
+  rescue CommitSuicide
+    suicide(in: tank)
   end
 
   def fail(err : ErrResult, in tank : Tank)
@@ -1681,11 +1720,15 @@ class Cell < RoundEntity
         fail(result, in: tank)
       end
     end
+  rescue CommitSuicide
+    suicide(in: tank)
   end
 
   # :ditto:
   def dyastole(in tank : Tank)
     @protocol.each_heartbeat_rule &.dyastole(for: self)
+  rescue CommitSuicide
+    suicide(in: tank)
   end
 
   def draw(tank : Tank, target)
@@ -3009,6 +3052,8 @@ end
 # [x] stop_time on inspect
 # [x] draw console in tank
 # [x] expose keyword in messageresponsecontext
+# [x] add die() to kill current cell programmatically
+# [x] add replicate() to copy cell programmaticaly
 # [ ] support clone using C-Middrag
 # [ ] wormhole wire -- listen at both ends, teleport to the opposite end
 #     represented by two circles "regions" at both ends connected by a 1px line
