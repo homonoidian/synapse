@@ -29,7 +29,7 @@ class KeywordInputView < InputFieldView
   end
 
   def text_color
-    active? ? super : SF::Color.new(0xa1, 0x6f, 0xb4)
+    SF::Color.new(0xad, 0x65, 0xca)
   end
 end
 
@@ -94,6 +94,24 @@ class KeywordRuleEditor
     @code_field_was_opened = false
   end
 
+  def try_give_focus_to_field?(index : Int, &) : Bool
+    return false unless (from = @fields[@focused_field]).can_blur?
+    return false unless (to = @fields[index]).can_focus?
+
+    yield from, to
+
+    from.blur
+    to.focus
+
+    @focused_field = index
+
+    true
+  end
+
+  def try_give_focus_to_field?(index : Int) : Bool
+    try_give_focus_to_field?(index) { }
+  end
+
   def try_move_to_code_from_fields? : Bool
     return false unless (from = @fields[@focused_field]).can_blur?
     return false unless (to = @code_field).can_focus?
@@ -123,47 +141,45 @@ class KeywordRuleEditor
   end
 
   def try_move_to_fields_from_code? : Bool
-    if @code_field.@state.at_first_line?
-      # move up to @fields
-      return false unless (from = @code_field).can_blur?
+    return false unless @code_field.@state.at_first_line?
+    # move up to @fields
+    return false unless (from = @code_field).can_blur?
 
-      # compute column in code
-      code_col = @code_field.@state.column + CODE_INSET_SPACES
+    # compute column in code
+    code_col = @code_field.@state.column + CODE_INSET_SPACES
 
-      # go thru @fields until all of them are exhausted or
-      # code column is found
-      #
-      # the following assumes @fields are single-line!
-      field_idx = 0
-      field_inner_idx = nil
-      to_index = @fields.size - 1
-      @fields.each_with_index do |editor, index|
-        next_field_idx = field_idx + editor.@state.size + 1 # plus whitespace between field
-        if next_field_idx > code_col
-          to_index = index
-          field_inner_idx = code_col - field_idx
-          break
-        end
-        field_idx = next_field_idx
+    # go thru @fields until all of them are exhausted or
+    # code column is found
+    #
+    # the following assumes @fields are single-line!
+    field_idx = 0
+    field_inner_idx = nil
+    to_index = @fields.size - 1
+    @fields.each_with_index do |editor, index|
+      next_field_idx = field_idx + editor.@state.size + 1 # plus whitespace between field
+      if next_field_idx > code_col
+        to_index = index
+        field_inner_idx = code_col - field_idx
+        break
       end
-
-      return false unless (to = @fields[to_index]).can_focus?
-
-      if field_inner_idx
-        to.@state.seek(field_inner_idx)
-      else
-        to.@state.to_end_index
-      end
-
-      from.blur
-      to.focus
-
-      @focused_code = false
-      @focused_field = to_index
-      return true
+      field_idx = next_field_idx
     end
 
-    false
+    return false unless (to = @fields[to_index]).can_focus?
+
+    if field_inner_idx
+      to.@state.seek(field_inner_idx)
+    else
+      to.@state.to_end_index
+    end
+
+    from.blur
+    to.focus
+
+    @focused_code = false
+    @focused_field = to_index
+
+    true
   end
 
   def try_move_to_next_field?(step : Int) : Bool
@@ -177,107 +193,79 @@ class KeywordRuleEditor
       to_index = @fields.size - 1 # clamp
     end
 
-    return false unless (from = @fields[@focused_field]).can_blur?
-    return false unless (to = @fields[to_index]).can_focus?
-
-    from.blur
-    to.focus
-    @focused_field = to_index
-
-    if step.negative?
-      from.@state.to_start_index
-      to.@state.to_end_index
-    else
-      from.@state.to_end_index
-      to.@state.to_start_index
+    try_give_focus_to_field?(to_index) do |from, to|
+      if step.negative?
+        from.@state.to_start_index
+        to.@state.to_end_index
+      else
+        from.@state.to_end_index
+        to.@state.to_start_index
+      end
     end
-
-    true
   end
 
   def try_merge_current_field_into_previous_field? : Bool
-    field = @fields[@focused_field]
+    return false unless @focused_field > 0 && @fields[@focused_field].@state.at_start_index?
 
-    if @focused_field > 0 && field.@state.at_start_index? # this & previous must be parameter
-      to_index = @focused_field - 1
-
-      # first check whether it wants to unfocus and previous
-      # wants to focus
-      return false unless (from = @fields[@focused_field]).can_blur?
-      return false unless (to = @fields[to_index]).can_focus?
-
-      # buffer stores with newline at the end (always), use
-      # rchop to omit it
-      curr_string = field.@state.string
+    try_give_focus_to_field?(@focused_field - 1) do |from, to|
+      curr_string = from.@state.string
 
       # Clear existing field
-      field.clear
-      field.blur
+      from.clear
 
       # Remove it
       @fields.delete_at(@focused_field)
 
-      @focused_field = to_index
-
       # Append
-      prev_state = @fields[@focused_field].@state
+      prev_state = to.@state
       prev_state.update! { prev_state.string + curr_string }
-
-      to.focus
-
-      return true
     end
-
-    false
   end
 
-  def try_merge_previous_field_into_current_field? : Bool
+  def try_merge_next_field_into_current_field? : Bool
     field = @fields[@focused_field]
 
-    if 0 <= @focused_field < @fields.size - 1 && field.@state.at_end_index? # this & next must be parameter
-      next_index = @focused_field + 1
+    return false unless 0 <= @focused_field < @fields.size - 1 && field.@state.at_end_index?
 
-      # first check whether it wants to unfocus and next
-      # wants to focus
-      return false unless (from = @fields[next_index]).can_blur?
+    next_index = @focused_field + 1
 
-      nxt = @fields[next_index]
+    # first check whether it wants to unfocus and next
+    # wants to focus
+    return false unless (from = @fields[next_index]).can_blur?
 
-      # buffer stores with newline at the end (always), use
-      # rchop to omit it
-      next_string = nxt.@state.string
+    nxt = @fields[next_index]
+    nxt.blur
 
-      # Clear next field
-      nxt.clear
-      nxt.blur
+    # buffer stores with newline at the end (always), use
+    # rchop to omit it
+    next_string = nxt.@state.string
 
-      # Remove it
-      @fields.delete_at(next_index)
+    # Clear next field
+    nxt.clear
 
-      # focused field is already = next_index then
+    # Remove it
+    @fields.delete_at(next_index)
 
-      # Prepend
-      curr_state = @fields[@focused_field].@state
-      # buffer stores with newline at the end (always), use
-      # rchop to omit it
-      curr_state.update! { curr_state.string + next_string }
+    # focused field is already = next_index then
 
-      @fields[@focused_field].refresh
+    # Prepend
+    curr_state = @fields[@focused_field].@state
+    # buffer stores with newline at the end (always), use
+    # rchop to omit it
+    curr_state.update! { curr_state.string + next_string }
 
-      return true
-    end
+    @fields[@focused_field].refresh
 
-    false
+    true
   end
 
   def try_move_to_adjacent?(prev : Bool) : Bool
-    if (prev && @fields[@focused_field].@state.at_start_index?) || (!prev && @fields[@focused_field].@state.at_end_index?)
-      # NOTE: almost the same as TAb/shift-tab but doesn't create anything
-      to_index = (@focused_field + (prev ? -1 : 1))
-      return false unless to_index.in?(0...@fields.size)
-      return false unless (from = @fields[@focused_field]).can_blur?
-      return false unless (to = @fields[to_index]).can_focus?
+    return false unless (prev && @fields[@focused_field].@state.at_start_index?) || (!prev && @fields[@focused_field].@state.at_end_index?)
+    # NOTE: almost the same as TAb/shift-tab but doesn't create anything
+    to_index = (@focused_field + (prev ? -1 : 1))
+    return false unless to_index.in?(0...@fields.size)
 
+    try_give_focus_to_field?(to_index) do |from, to|
       if prev
         from.@state.to_start_index
         to.@state.to_end_index
@@ -285,93 +273,66 @@ class KeywordRuleEditor
         from.@state.to_end_index
         to.@state.to_start_index
       end
-
-      from.blur
-      to.focus
-      @focused_field = to_index
-
-      return true
     end
 
-    false
+    true
   end
 
   def try_insert_field?(before : Bool) : Bool
-    unless @focused_field == 0 && before # can't insert before keyword
-      ins_index = @focused_field + (before ? 0 : 1)
+    return false if @focused_field == 0 && before # can't insert before keyword
+    ins_index = @focused_field + (before ? 0 : 1)
 
-      return false unless (from = @fields[@focused_field]).can_blur?
+    return false unless (from = @fields[@focused_field]).can_blur?
 
-      from_state = @fields[@focused_field].@state
+    from_state = @fields[@focused_field].@state
 
-      field = @fields[@focused_field].@view
-      corner = field.position + field.size
-      # insert with dummy position
-      @fields.insert(ins_index, to = param_input(SF.vector2f(0, 0)))
-      # recompute positions
-      @fields.each_cons_pair do |a, b|
-        av_corner = a.@view.position + a.@view.size
-        b.@view.position = SF.vector2f(av_corner.x + WS_WIDTH, a.@view.position.y)
-      end
-
-      if before
-        # shift-enter: move before cursor in from_buf to to_buf
-        to.@state.update! { from_state.before_cursor }
-        from_state.delete_before_cursor
-      else
-        # enter: move after cursor in from_buf to to_buf
-        to.@state.update! { from_state.after_cursor }
-        from_state.delete_after_cursor
-      end
-
-      from.blur
-      @focused_field = ins_index
-
-      if before
-        from.@state.to_start_index
-        to.@state.to_end_index
-      else
-        from.@state.to_end_index
-        to.@state.to_start_index
-      end
-      to.focus
-
-      return true
+    field = @fields[@focused_field].@view
+    corner = field.position + field.size
+    # insert with dummy position
+    @fields.insert(ins_index, to = param_input(SF.vector2f(0, 0)))
+    # recompute positions
+    @fields.each_cons_pair do |a, b|
+      av_corner = a.@view.position + a.@view.size
+      b.@view.position = SF.vector2f(av_corner.x + WS_WIDTH, a.@view.position.y)
     end
 
-    false
+    if before
+      # shift-enter: move before cursor in from_buf to to_buf
+      to.@state.update! { from_state.before_cursor }
+      from_state.delete_before_cursor
+    else
+      # enter: move after cursor in from_buf to to_buf
+      to.@state.update! { from_state.after_cursor }
+      from_state.delete_after_cursor
+    end
+
+    from.blur
+    @focused_field = ins_index
+
+    if before
+      from.@state.to_start_index
+      to.@state.to_end_index
+    else
+      from.@state.to_end_index
+      to.@state.to_start_index
+    end
+    to.focus
+
+    true
   end
 
   def try_move_to_home? : Bool
-    to_index = 0
+    return false unless @fields[@focused_field].@state.at_start_index?
 
-    if @fields[@focused_field].@state.at_start_index?
-      return false unless (from = @fields[@focused_field]).can_blur?
-      return false unless (to = @fields[to_index]).can_focus?
-
-      from.blur
-      to.focus
-      @focused_field = to_index
-
-      # let dest  handle .home?
-    end
+    try_give_focus_to_field?(0) # let dest  handle .home?
 
     false
   end
 
   def try_move_to_end? : Bool
-    to_index = @fields.size - 1
+    return false unless @fields[@focused_field].@state.at_end_index?
 
-    if @fields[@focused_field].@state.at_end_index?
-      return false unless (from = @fields[@focused_field]).can_blur?
-      return false unless (to = @fields[to_index]).can_focus?
-
-      from.blur
-      to.focus
-      @focused_field = to_index
-
-      # let dest  handle .end?
-    end
+    try_give_focus_to_field?(@fields.size - 1) # let dest  handle .end?
 
     false
   end
@@ -388,7 +349,7 @@ class KeywordRuleEditor
       when .down?          then try_move_to_code_from_fields?
       when .tab?           then try_move_to_next_field?(step: event.shift ? -1 : 1)
       when .backspace?     then try_merge_current_field_into_previous_field?
-      when .delete?        then try_merge_previous_field_into_current_field?
+      when .delete?        then try_merge_next_field_into_current_field?
       when .left?, .right? then try_move_to_adjacent?(prev: event.code.left?)
       when .enter?         then try_insert_field?(before: event.shift)
       when .home?          then try_move_to_home?
@@ -588,7 +549,7 @@ end
 # TODO: extract component RuleEditor, KeywordRuleEditor, HeartbeatRuleEditor etc. with models,
 #       make models take and talk to and edit corresponding rule objects (via pressing
 #       accept/reject after edits [accept = C-s]; and monitoring whether model content == rule object content) [ ]
-# TODO: highlight keyword in different color even when unfocused [ ]
+# TODO: highlight keyword in different color even when unfocused [x]
 # TODO: support validation of input fields with red highlight and pointy error [ ]
 #   keyword -- anything
 #   params -- letters followed by symbols
