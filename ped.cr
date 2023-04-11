@@ -23,31 +23,47 @@ FONT_ITALIC.get_texture(11).smooth = false
 window = SF::RenderWindow.new(SF::VideoMode.new(800, 600), title: "Protocol Editor")
 window.framerate_limit = 60
 
+class KeywordInputView < InputFieldView
+  def font
+    FONT_ITALIC
+  end
+
+  def text_color
+    active? ? super : SF::Color.new(0xa1, 0x6f, 0xb4)
+  end
+end
+
+class KeywordInput < InputField
+  def initialize(state : InputFieldState, view : KeywordInputView)
+    super(state, view)
+  end
+end
+
+class ParamInput < InputField
+end
+
+class CodeField < BufferEditor
+end
+
 def keyword_input(position)
-  # TODO: use InputField child instead of exposing state, view
   state = InputFieldState.new
-
-  view = InputFieldView.new
+  view = KeywordInputView.new
   view.position = position
-
-  {InputField.new(state, view), view, state}
+  KeywordInput.new(state, view)
 end
 
 def param_input(position)
-  # TODO: use InputField child instead of exposing state, view
   state = InputFieldState.new
-
   view = InputFieldView.new
   view.position = position
-
-  {InputField.new(state, view), view, state}
+  ParamInput.new(state, view)
 end
 
 def code_input(position)
+  state = BufferEditorState.new
   view = BufferEditorView.new
   view.position = position
-
-  BufferEditor.new(BufferEditorState.new, view)
+  CodeField.new(state, view)
 end
 
 focused_field = 0
@@ -61,10 +77,8 @@ CODE_MARGIN_Y     = 16
 
 origin = SF.vector2f(100, 100)
 
-fields = [
-  keyword_input(origin),
-]
-fields[focused_field][0].focus
+fields = [keyword_input(origin)] of BufferEditor
+fields[focused_field].focus
 
 code_field = code_input(origin + SF.vector2f(CODE_INSET_X, LINE_HEIGHT + CODE_MARGIN_Y))
 code_field.blur
@@ -111,8 +125,8 @@ while window.open?
             field_idx = 0
             field_inner_idx = nil
             to_index = fields.size - 1
-            fields.each_with_index do |(field, _, state), index|
-              next_field_idx = field_idx + state.size + 1 # plus whitespace between field
+            fields.each_with_index do |editor, index|
+              next_field_idx = field_idx + editor.@state.size + 1 # plus whitespace between field
               if next_field_idx > code_col
                 to_index = index
                 field_inner_idx = code_col - field_idx
@@ -121,7 +135,7 @@ while window.open?
               field_idx = next_field_idx
             end
 
-            next unless (to = fields[to_index][0]).can_focus?
+            next unless (to = fields[to_index]).can_focus?
 
             if field_inner_idx
               to.@state.seek(field_inner_idx)
@@ -142,7 +156,7 @@ while window.open?
         case event.code
         when .down?
           # FIXME: use default handler (see below) instead of nexting over it
-          next unless (from = fields[focused_field][0]).can_blur?
+          next unless (from = fields[focused_field]).can_blur?
           next unless (to = code_field).can_focus?
 
           code_field_was_opened = true
@@ -150,12 +164,12 @@ while window.open?
           # Compute column in fields
 
           col = 0
-          fields.each_with_index do |(_, _, state), index|
+          fields.each_with_index do |editor, index|
             break if index >= focused_field
-            col += state.size + 1
+            col += editor.@state.size + 1
           end
 
-          col += fields[focused_field][0].@state.column
+          col += fields[focused_field].@state.column
           col -= CODE_INSET_SPACES
 
           col = Math.min(to.@state.line.size, col)
@@ -171,15 +185,15 @@ while window.open?
           next if to_index < 0 # NOTE: but this shouldn't use the default handler!
 
           if to_index >= fields.size
-            field = fields[focused_field][1]
-            corner = field.position + field.size
-            fields << param_input(SF.vector2f(corner.x + WS_WIDTH, field.position.y))
+            field = fields[focused_field]
+            corner = field.@view.position + field.@view.size
+            fields << param_input(SF.vector2f(corner.x + WS_WIDTH, field.@view.position.y))
             to_index = fields.size - 1 # clamp
           end
 
           # FIXME: use default handler (see below) instead of nexting over it
-          next unless (from = fields[focused_field][0]).can_blur?
-          next unless (to = fields[to_index][0]).can_focus?
+          next unless (from = fields[focused_field]).can_blur?
+          next unless (to = fields[to_index]).can_focus?
 
           from.blur
           to.focus
@@ -197,23 +211,21 @@ while window.open?
         when .backspace?
           field = fields[focused_field]
 
-          if focused_field > 0 && field[2].at_start_index? # this & previous must be parameter
+          if focused_field > 0 && field.@state.at_start_index? # this & previous must be parameter
             to_index = focused_field - 1
 
             # first check whether it wants to unfocus and previous
             # wants to focus
-            next unless (from = fields[focused_field][0]).can_blur? # FIXME: use default handler
-            next unless (to = fields[to_index][0]).can_focus?       # FIXME: use default handler
-
-            f, _, state = field
+            next unless (from = fields[focused_field]).can_blur? # FIXME: use default handler
+            next unless (to = fields[to_index]).can_focus?       # FIXME: use default handler
 
             # buffer stores with newline at the end (always), use
             # rchop to omit it
-            curr_string = state.string
+            curr_string = field.@state.string
 
             # Clear existing field
-            f.clear
-            f.blur
+            field.clear
+            field.blur
 
             # Remove it
             fields.delete_at(focused_field)
@@ -221,7 +233,7 @@ while window.open?
             focused_field = to_index
 
             # Append
-            prev_state = fields[focused_field][2]
+            prev_state = fields[focused_field].@state
             prev_state.update! { prev_state.string + curr_string }
 
             to.focus
@@ -231,18 +243,18 @@ while window.open?
         when .delete?
           field = fields[focused_field]
 
-          if 0 <= focused_field < fields.size - 1 && field[2].at_end_index? # this & next must be parameter
+          if 0 <= focused_field < fields.size - 1 && field.@state.at_end_index? # this & next must be parameter
             next_index = focused_field + 1
 
             # first check whether it wants to unfocus and next
             # wants to focus
-            next unless (from = fields[next_index][0]).can_blur? # FIXME: use default handler
+            next unless (from = fields[next_index]).can_blur? # FIXME: use default handler
 
-            nxt, _, next_state = fields[next_index]
+            nxt = fields[next_index]
 
             # buffer stores with newline at the end (always), use
             # rchop to omit it
-            next_string = next_state.string
+            next_string = nxt.@state.string
 
             # Clear next field
             nxt.clear
@@ -254,25 +266,25 @@ while window.open?
             # focused field is already = next_index then
 
             # Prepend
-            curr_state = fields[focused_field][2]
+            curr_state = fields[focused_field].@state
             # buffer stores with newline at the end (always), use
             # rchop to omit it
             curr_state.update! { curr_state.string + next_string }
 
-            fields[focused_field][0].refresh
+            fields[focused_field].refresh
 
             next
           end
         when .left?, .right?
           prev = event.code.left?
 
-          if (prev && fields[focused_field][2].at_start_index?) || (!prev && fields[focused_field][2].at_end_index?)
+          if (prev && fields[focused_field].@state.at_start_index?) || (!prev && fields[focused_field].@state.at_end_index?)
             # NOTE: almost the same as TAb/shift-tab but doesn't create anything
             to_index = (focused_field + (prev ? -1 : 1))
             # FIXME: use default handler (see below) instead of nexting over it
             next unless to_index.in?(0...fields.size)
-            next unless (from = fields[focused_field][0]).can_blur?
-            next unless (to = fields[to_index][0]).can_focus?
+            next unless (from = fields[focused_field]).can_blur?
+            next unless (to = fields[to_index]).can_focus?
 
             if prev
               from.@state.to_start_index
@@ -293,29 +305,27 @@ while window.open?
             ins_index = focused_field + (event.shift ? 0 : 1)
 
             # FIXME: use default handler (see below) instead of nexting over it
-            next unless (from = fields[focused_field][0]).can_blur?
+            next unless (from = fields[focused_field]).can_blur?
 
-            from_state = fields[focused_field][2]
+            from_state = fields[focused_field].@state
 
-            field = fields[focused_field][1]
+            field = fields[focused_field].@view
             corner = field.position + field.size
             # insert with dummy position
             fields.insert(ins_index, to = param_input(SF.vector2f(0, 0)))
             # recompute positions
-            fields.each_cons_pair do |(a, av), (b, bv)|
-              av_corner = av.position + av.size
-              bv.position = SF.vector2f(av_corner.x + WS_WIDTH, av.position.y)
+            fields.each_cons_pair do |a, b|
+              av_corner = a.@view.position + a.@view.size
+              b.@view.position = SF.vector2f(av_corner.x + WS_WIDTH, a.@view.position.y)
             end
-
-            to, _, to_state = to
 
             if event.shift
               # shift-enter: move before cursor in from_buf to to_buf
-              to_state.update! { from_state.before_cursor }
+              to.@state.update! { from_state.before_cursor }
               from_state.delete_before_cursor
             else
               # enter: move after cursor in from_buf to to_buf
-              to_state.update! { from_state.after_cursor }
+              to.@state.update! { from_state.after_cursor }
               from_state.delete_after_cursor
             end
 
@@ -335,17 +345,17 @@ while window.open?
           end
         when .home?, .end?
           if event.code.home?
-            cond = fields[focused_field][2].at_start_index?
+            cond = fields[focused_field].@state.at_start_index?
             to_index = 0
           else
-            cond = fields[focused_field][2].at_end_index?
+            cond = fields[focused_field].@state.at_end_index?
             to_index = fields.size - 1
           end
 
           if cond
             # FIXME: use default handler (see below) instead of nexting over it
-            next unless (from = fields[focused_field][0]).can_blur?
-            next unless (to = fields[to_index][0]).can_focus?
+            next unless (from = fields[focused_field]).can_blur?
+            next unless (to = fields[to_index]).can_focus?
 
             from.blur
             to.focus
@@ -358,10 +368,10 @@ while window.open?
     if focused_code
       code_field.handle(event)
     else
-      fields[focused_field][0].handle(event)
-      fields.each_cons_pair do |(a, av), (b, bv)|
-        av_corner = av.position + av.size
-        bv.position = SF.vector2f(av_corner.x + WS_WIDTH, bv.position.y)
+      fields[focused_field].handle(event)
+      fields.each_cons_pair do |a, b|
+        av_corner = a.@view.position + a.@view.size
+        b.@view.position = SF.vector2f(av_corner.x + WS_WIDTH, b.@view.position.y)
       end
     end
   end
@@ -376,9 +386,12 @@ while window.open?
   bgrect = SF::RectangleShape.new
   bgrect.position = origin - padding
 
+  fields_w = fields.sum { |field| field.@view.size.x } + WS_WIDTH * fields.size
+  fields_h = fields.max_of { |field| field.@view.size.y }
+
   computed_size = SF.vector2f(
-    Math.max(fields.sum(&.[1].size.x) + WS_WIDTH * fields.size, code_field.@view.size.x + WS_WIDTH * CODE_INSET_SPACES*2),
-    fields.max_of(&.[1].size.y) + LINE_HEIGHT + (code_field_was_opened ? CODE_MARGIN_Y + code_field.@view.size.y : 0)
+    Math.max(fields_w, code_field.@view.size.x + WS_WIDTH * CODE_INSET_SPACES*2),
+    fields_h + LINE_HEIGHT + (code_field_was_opened ? CODE_MARGIN_Y + code_field.@view.size.y : 0)
   ) + padding*2
   bgrect.outline_thickness = 1
   bgrect.outline_color = SF::Color.new(0x61, 0x61, 0x61)
@@ -443,7 +456,7 @@ while window.open?
     buttons << {:reject, btn.global_bounds}
   end
 
-  fields.each do |field, _|
+  fields.each do |field|
     window.draw(field)
   end
 
@@ -452,7 +465,7 @@ while window.open?
     code_bgrect = SF::RectangleShape.new
     code_bgrect.position = SF.vector2f(origin.x - padding.x, code_field.@view.position.y - CODE_MARGIN_Y//2)
     code_bgrect.fill_color = SF::Color.new(0x32, 0x32, 0x32)
-    code_bgrect.size = bgrect.size - SF.vector2f(0, fields.max_of(&.[1].size.y) + CODE_MARGIN_Y + 5)
+    code_bgrect.size = bgrect.size - SF.vector2f(0, fields_h + CODE_MARGIN_Y + 5)
     window.draw(code_bgrect)
 
     sep = SF::RectangleShape.new
