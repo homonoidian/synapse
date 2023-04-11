@@ -94,262 +94,309 @@ class KeywordRuleEditor
     @code_field_was_opened = false
   end
 
-  def handle?(event : SF::Event::KeyPressed) : Bool
-    if @focused_code
-      case event.code
-      when .up?
-        if @code_field.@state.at_first_line?
-          # move up to @fields
-          return false unless (from = @code_field).can_blur?
+  def try_move_to_code_from_fields? : Bool
+    return false unless (from = @fields[@focused_field]).can_blur?
+    return false unless (to = @code_field).can_focus?
 
-          # compute column in code
-          code_col = @code_field.@state.column + CODE_INSET_SPACES
+    @code_field_was_opened = true
 
-          # go thru @fields until all of them are exhausted or
-          # code column is found
-          #
-          # the following assumes @fields are single-line!
-          field_idx = 0
-          field_inner_idx = nil
-          to_index = @fields.size - 1
-          @fields.each_with_index do |editor, index|
-            next_field_idx = field_idx + editor.@state.size + 1 # plus whitespace between field
-            if next_field_idx > code_col
-              to_index = index
-              field_inner_idx = code_col - field_idx
-              break
-            end
-            field_idx = next_field_idx
-          end
+    # Compute column in @fields
 
-          return false unless (to = @fields[to_index]).can_focus?
+    col = 0
+    @fields.each_with_index do |editor, index|
+      break if index >= @focused_field
+      col += editor.@state.size + 1
+    end
 
-          if field_inner_idx
-            to.@state.seek(field_inner_idx)
-          else
-            to.@state.to_end_index
-          end
+    col += @fields[@focused_field].@state.column
+    col -= CODE_INSET_SPACES
 
-          from.blur
-          to.focus
+    col = Math.min(to.@state.line.size, col)
+    to.@state.to_column(col)
 
-          @focused_code = false
-          @focused_field = to_index
-          return true
+    from.blur
+    to.focus
+
+    @focused_code = true
+
+    true
+  end
+
+  def try_move_to_fields_from_code? : Bool
+    if @code_field.@state.at_first_line?
+      # move up to @fields
+      return false unless (from = @code_field).can_blur?
+
+      # compute column in code
+      code_col = @code_field.@state.column + CODE_INSET_SPACES
+
+      # go thru @fields until all of them are exhausted or
+      # code column is found
+      #
+      # the following assumes @fields are single-line!
+      field_idx = 0
+      field_inner_idx = nil
+      to_index = @fields.size - 1
+      @fields.each_with_index do |editor, index|
+        next_field_idx = field_idx + editor.@state.size + 1 # plus whitespace between field
+        if next_field_idx > code_col
+          to_index = index
+          field_inner_idx = code_col - field_idx
+          break
         end
+        field_idx = next_field_idx
       end
-      # continue to default handler
-    else
-      case event.code
-      when .down?
-        return false unless (from = @fields[@focused_field]).can_blur?
-        return false unless (to = @code_field).can_focus?
 
-        @code_field_was_opened = true
+      return false unless (to = @fields[to_index]).can_focus?
 
-        # Compute column in @fields
-
-        col = 0
-        @fields.each_with_index do |editor, index|
-          break if index >= @focused_field
-          col += editor.@state.size + 1
-        end
-
-        col += @fields[@focused_field].@state.column
-        col -= CODE_INSET_SPACES
-
-        col = Math.min(to.@state.line.size, col)
-        to.@state.to_column(col)
-
-        from.blur
-        to.focus
-
-        @focused_code = true
-        return true
-      when .tab?
-        to_index = (@focused_field + (event.shift ? -1 : 1))
-        return true if to_index < 0
-
-        if to_index >= @fields.size
-          field = @fields[@focused_field]
-          corner = field.@view.position + field.@view.size
-          @fields << param_input(SF.vector2f(corner.x + WS_WIDTH, field.@view.position.y))
-          to_index = @fields.size - 1 # clamp
-        end
-
-        return false unless (from = @fields[@focused_field]).can_blur?
-        return false unless (to = @fields[to_index]).can_focus?
-
-        from.blur
-        to.focus
-        @focused_field = to_index
-
-        if event.shift
-          from.@state.to_start_index
-          to.@state.to_end_index
-        else
-          from.@state.to_end_index
-          to.@state.to_start_index
-        end
-
-        return true
-      when .backspace?
-        field = @fields[@focused_field]
-
-        if @focused_field > 0 && field.@state.at_start_index? # this & previous must be parameter
-          to_index = @focused_field - 1
-
-          # first check whether it wants to unfocus and previous
-          # wants to focus
-          return false unless (from = @fields[@focused_field]).can_blur?
-          return false unless (to = @fields[to_index]).can_focus?
-
-          # buffer stores with newline at the end (always), use
-          # rchop to omit it
-          curr_string = field.@state.string
-
-          # Clear existing field
-          field.clear
-          field.blur
-
-          # Remove it
-          @fields.delete_at(@focused_field)
-
-          @focused_field = to_index
-
-          # Append
-          prev_state = @fields[@focused_field].@state
-          prev_state.update! { prev_state.string + curr_string }
-
-          to.focus
-
-          return true
-        end
-      when .delete?
-        field = @fields[@focused_field]
-
-        if 0 <= @focused_field < @fields.size - 1 && field.@state.at_end_index? # this & next must be parameter
-          next_index = @focused_field + 1
-
-          # first check whether it wants to unfocus and next
-          # wants to focus
-          return false unless (from = @fields[next_index]).can_blur?
-
-          nxt = @fields[next_index]
-
-          # buffer stores with newline at the end (always), use
-          # rchop to omit it
-          next_string = nxt.@state.string
-
-          # Clear next field
-          nxt.clear
-          nxt.blur
-
-          # Remove it
-          @fields.delete_at(next_index)
-
-          # focused field is already = next_index then
-
-          # Prepend
-          curr_state = @fields[@focused_field].@state
-          # buffer stores with newline at the end (always), use
-          # rchop to omit it
-          curr_state.update! { curr_state.string + next_string }
-
-          @fields[@focused_field].refresh
-
-          return true
-        end
-      when .left?, .right?
-        prev = event.code.left?
-
-        if (prev && @fields[@focused_field].@state.at_start_index?) || (!prev && @fields[@focused_field].@state.at_end_index?)
-          # NOTE: almost the same as TAb/shift-tab but doesn't create anything
-          to_index = (@focused_field + (prev ? -1 : 1))
-          # FIXME: use default handler (see below) instead of nexting over it
-          return false unless to_index.in?(0...@fields.size)
-          return false unless (from = @fields[@focused_field]).can_blur?
-          return false unless (to = @fields[to_index]).can_focus?
-
-          if prev
-            from.@state.to_start_index
-            to.@state.to_end_index
-          else
-            from.@state.to_end_index
-            to.@state.to_start_index
-          end
-
-          from.blur
-          to.focus
-          @focused_field = to_index
-
-          return true
-        end
-      when .enter?
-        unless @focused_field == 0 && event.shift # can't insert before keyword
-          ins_index = @focused_field + (event.shift ? 0 : 1)
-
-          return false unless (from = @fields[@focused_field]).can_blur?
-
-          from_state = @fields[@focused_field].@state
-
-          field = @fields[@focused_field].@view
-          corner = field.position + field.size
-          # insert with dummy position
-          @fields.insert(ins_index, to = param_input(SF.vector2f(0, 0)))
-          # recompute positions
-          @fields.each_cons_pair do |a, b|
-            av_corner = a.@view.position + a.@view.size
-            b.@view.position = SF.vector2f(av_corner.x + WS_WIDTH, a.@view.position.y)
-          end
-
-          if event.shift
-            # shift-enter: move before cursor in from_buf to to_buf
-            to.@state.update! { from_state.before_cursor }
-            from_state.delete_before_cursor
-          else
-            # enter: move after cursor in from_buf to to_buf
-            to.@state.update! { from_state.after_cursor }
-            from_state.delete_after_cursor
-          end
-
-          from.blur
-          @focused_field = ins_index
-
-          if event.shift
-            from.@state.to_start_index
-            to.@state.to_end_index
-          else
-            from.@state.to_end_index
-            to.@state.to_start_index
-          end
-          to.focus
-
-          return true
-        end
-      when .home?, .end?
-        if event.code.home?
-          cond = @fields[@focused_field].@state.at_start_index?
-          to_index = 0
-        else
-          cond = @fields[@focused_field].@state.at_end_index?
-          to_index = @fields.size - 1
-        end
-
-        if cond
-          return false unless (from = @fields[@focused_field]).can_blur?
-          return false unless (to = @fields[to_index]).can_focus?
-
-          from.blur
-          to.focus
-          @focused_field = to_index
-
-          return true
-        end
+      if field_inner_idx
+        to.@state.seek(field_inner_idx)
+      else
+        to.@state.to_end_index
       end
+
+      from.blur
+      to.focus
+
+      @focused_code = false
+      @focused_field = to_index
+      return true
     end
 
     false
+  end
+
+  def try_move_to_next_field?(step : Int) : Bool
+    to_index = @focused_field + step
+    return true if to_index < 0
+
+    if to_index >= @fields.size
+      field = @fields[@focused_field]
+      corner = field.@view.position + field.@view.size
+      @fields << param_input(SF.vector2f(corner.x + WS_WIDTH, field.@view.position.y))
+      to_index = @fields.size - 1 # clamp
+    end
+
+    return false unless (from = @fields[@focused_field]).can_blur?
+    return false unless (to = @fields[to_index]).can_focus?
+
+    from.blur
+    to.focus
+    @focused_field = to_index
+
+    if step.negative?
+      from.@state.to_start_index
+      to.@state.to_end_index
+    else
+      from.@state.to_end_index
+      to.@state.to_start_index
+    end
+
+    true
+  end
+
+  def try_merge_current_field_into_previous_field? : Bool
+    field = @fields[@focused_field]
+
+    if @focused_field > 0 && field.@state.at_start_index? # this & previous must be parameter
+      to_index = @focused_field - 1
+
+      # first check whether it wants to unfocus and previous
+      # wants to focus
+      return false unless (from = @fields[@focused_field]).can_blur?
+      return false unless (to = @fields[to_index]).can_focus?
+
+      # buffer stores with newline at the end (always), use
+      # rchop to omit it
+      curr_string = field.@state.string
+
+      # Clear existing field
+      field.clear
+      field.blur
+
+      # Remove it
+      @fields.delete_at(@focused_field)
+
+      @focused_field = to_index
+
+      # Append
+      prev_state = @fields[@focused_field].@state
+      prev_state.update! { prev_state.string + curr_string }
+
+      to.focus
+
+      return true
+    end
+
+    false
+  end
+
+  def try_merge_previous_field_into_current_field? : Bool
+    field = @fields[@focused_field]
+
+    if 0 <= @focused_field < @fields.size - 1 && field.@state.at_end_index? # this & next must be parameter
+      next_index = @focused_field + 1
+
+      # first check whether it wants to unfocus and next
+      # wants to focus
+      return false unless (from = @fields[next_index]).can_blur?
+
+      nxt = @fields[next_index]
+
+      # buffer stores with newline at the end (always), use
+      # rchop to omit it
+      next_string = nxt.@state.string
+
+      # Clear next field
+      nxt.clear
+      nxt.blur
+
+      # Remove it
+      @fields.delete_at(next_index)
+
+      # focused field is already = next_index then
+
+      # Prepend
+      curr_state = @fields[@focused_field].@state
+      # buffer stores with newline at the end (always), use
+      # rchop to omit it
+      curr_state.update! { curr_state.string + next_string }
+
+      @fields[@focused_field].refresh
+
+      return true
+    end
+
+    false
+  end
+
+  def try_move_to_adjacent?(prev : Bool) : Bool
+    if (prev && @fields[@focused_field].@state.at_start_index?) || (!prev && @fields[@focused_field].@state.at_end_index?)
+      # NOTE: almost the same as TAb/shift-tab but doesn't create anything
+      to_index = (@focused_field + (prev ? -1 : 1))
+      return false unless to_index.in?(0...@fields.size)
+      return false unless (from = @fields[@focused_field]).can_blur?
+      return false unless (to = @fields[to_index]).can_focus?
+
+      if prev
+        from.@state.to_start_index
+        to.@state.to_end_index
+      else
+        from.@state.to_end_index
+        to.@state.to_start_index
+      end
+
+      from.blur
+      to.focus
+      @focused_field = to_index
+
+      return true
+    end
+
+    false
+  end
+
+  def try_insert_field?(before : Bool) : Bool
+    unless @focused_field == 0 && before # can't insert before keyword
+      ins_index = @focused_field + (before ? 0 : 1)
+
+      return false unless (from = @fields[@focused_field]).can_blur?
+
+      from_state = @fields[@focused_field].@state
+
+      field = @fields[@focused_field].@view
+      corner = field.position + field.size
+      # insert with dummy position
+      @fields.insert(ins_index, to = param_input(SF.vector2f(0, 0)))
+      # recompute positions
+      @fields.each_cons_pair do |a, b|
+        av_corner = a.@view.position + a.@view.size
+        b.@view.position = SF.vector2f(av_corner.x + WS_WIDTH, a.@view.position.y)
+      end
+
+      if before
+        # shift-enter: move before cursor in from_buf to to_buf
+        to.@state.update! { from_state.before_cursor }
+        from_state.delete_before_cursor
+      else
+        # enter: move after cursor in from_buf to to_buf
+        to.@state.update! { from_state.after_cursor }
+        from_state.delete_after_cursor
+      end
+
+      from.blur
+      @focused_field = ins_index
+
+      if before
+        from.@state.to_start_index
+        to.@state.to_end_index
+      else
+        from.@state.to_end_index
+        to.@state.to_start_index
+      end
+      to.focus
+
+      return true
+    end
+
+    false
+  end
+
+  def try_move_to_home? : Bool
+    to_index = 0
+
+    if @fields[@focused_field].@state.at_start_index?
+      return false unless (from = @fields[@focused_field]).can_blur?
+      return false unless (to = @fields[to_index]).can_focus?
+
+      from.blur
+      to.focus
+      @focused_field = to_index
+
+      # let dest  handle .home?
+    end
+
+    false
+  end
+
+  def try_move_to_end? : Bool
+    to_index = @fields.size - 1
+
+    if @fields[@focused_field].@state.at_end_index?
+      return false unless (from = @fields[@focused_field]).can_blur?
+      return false unless (to = @fields[to_index]).can_focus?
+
+      from.blur
+      to.focus
+      @focused_field = to_index
+
+      # let dest  handle .end?
+    end
+
+    false
+  end
+
+  def handle?(event : SF::Event::KeyPressed) : Bool
+    if @focused_code
+      case event.code
+      when .up? then try_move_to_fields_from_code?
+      else
+        false
+      end
+    else
+      case event.code
+      when .down?          then try_move_to_code_from_fields?
+      when .tab?           then try_move_to_next_field?(step: event.shift ? -1 : 1)
+      when .backspace?     then try_merge_current_field_into_previous_field?
+      when .delete?        then try_merge_previous_field_into_current_field?
+      when .left?, .right? then try_move_to_adjacent?(prev: event.code.left?)
+      when .enter?         then try_insert_field?(before: event.shift)
+      when .home?          then try_move_to_home?
+      when .end?           then try_move_to_end?
+      else
+        false
+      end
+    end
   end
 
   def handle?(event : SF::Event::MouseButtonReleased) : Bool
