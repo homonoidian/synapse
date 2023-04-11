@@ -22,7 +22,7 @@ class InputFieldView < BufferEditorView
   property max_width : Int32?
 
   # Holds the minimum width of this input field, in pixels.
-  property min_width = 6
+  property min_width = 4
 
   # Holds the position of this input field view.
   property position = SF.vector2f(0, 0)

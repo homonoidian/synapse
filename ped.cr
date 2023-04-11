@@ -124,10 +124,30 @@ fields[focused_field][0].focus
 code_field = code_input(origin + SF.vector2f(CODE_INSET_X, LINE_HEIGHT + CODE_MARGIN_Y))
 code_field.blur
 
+sync = false
+buttons = [] of {Symbol, SF::FloatRect}
+pressed_id = nil
+code_field_was_opened = false
+
 while window.open?
   while event = window.poll_event
     case event
     when SF::Event::Closed then window.close
+    when SF::Event::MouseButtonPressed
+      pt = SF.vector2f(event.x, event.y)
+      buttons.each do |(id, button)|
+        if button.contains?(pt)
+          pressed_id = id
+        end
+      end
+    when SF::Event::MouseButtonReleased
+      pt = SF.vector2f(event.x, event.y)
+      buttons.each do |(id, button)|
+        if button.contains?(pt) && pressed_id == id
+          puts "Pressed #{id}!"
+        end
+        pressed_button = nil
+      end
     when SF::Event::KeyPressed
       if focused_code
         case event.code
@@ -179,6 +199,8 @@ while window.open?
           # FIXME: use default handler (see below) instead of nexting over it
           next unless (from = fields[focused_field][0]).can_blur?
           next unless (to = code_field).can_focus?
+
+          code_field_was_opened = true
 
           # Compute column in fields
 
@@ -411,36 +433,91 @@ while window.open?
 
   computed_size = SF.vector2f(
     Math.max(fields.sum(&.[1].size.x) + WS_WIDTH * fields.size, code_field.@view.size.x + WS_WIDTH * CODE_INSET_SPACES*2),
-    fields.max_of(&.[1].size.y) + LINE_HEIGHT + CODE_MARGIN_Y + code_field.@view.size.y
+    fields.max_of(&.[1].size.y) + LINE_HEIGHT + (code_field_was_opened ? CODE_MARGIN_Y + code_field.@view.size.y : 0)
   ) + padding*2
   bgrect.outline_thickness = 1
   bgrect.outline_color = SF::Color.new(0x61, 0x61, 0x61)
-  bgrect.size = SF.vector2f(
-    Math.max(computed_size.x, min_code_size.x),
-    Math.max(computed_size.y, min_code_size.y),
-  )
+  if code_field_was_opened
+    bgrect.size = SF.vector2f(
+      Math.max(computed_size.x, min_code_size.x),
+      Math.max(computed_size.y, min_code_size.y),
+    )
+  else
+    bgrect.size = SF.vector2f(
+      Math.max(computed_size.x, min_code_size.x),
+      computed_size.y
+    )
+  end
 
   bgrect.fill_color = SF::Color.new(0x32, 0x32, 0x32)
   window.draw(bgrect)
+
+  action_w = 25
+  action_px = 5
+  action_py = 5
+
+  # draw bg for accept/reject/ok
+  bgaction = SF::RectangleShape.new
+  bgaction.position = bgrect.position - SF.vector2f(action_w, 1)
+  bgaction.size = SF.vector2f(action_w, (code_field_was_opened ? min_code_size.y + padding.y : computed_size.y + padding.y) - 1)
+  bgaction.fill_color = bgrect.outline_color
+  window.draw(bgaction)
+
+  btn_area = SF.vector2f(action_w - action_px*2, bgaction.size.y - action_py*2)
+  btn_origin = bgaction.position + (bgaction.size - btn_area)/2
+
+  sync = !focused_code
+
+  buttons.clear
+
+  # draw ok
+  if sync
+    okbtn = SF::RectangleShape.new
+    okbtn.size = btn_area
+    okbtn.position = btn_origin
+    okbtn.fill_color = SF::Color.new(0x96, 0xad, 0xcc)
+    window.draw(okbtn)
+  else
+    gap = 3
+    subbtn_area = SF.vector2f(btn_area.x, btn_area.y / 2 - gap)
+    btn_accept_origin = btn_origin
+    btn_reject_origin = btn_origin + SF.vector2f(0, btn_area.y / 2 + gap)
+
+    btn = SF::RectangleShape.new
+    btn.size = subbtn_area
+    # accept
+    btn.position = btn_accept_origin
+    btn.fill_color = SF::Color.new(0x9b, 0xb1, 0x91)
+    window.draw(btn)
+    buttons << {:accept, btn.global_bounds}
+
+    # reject
+    btn.position = btn_reject_origin
+    btn.fill_color = SF::Color.new(0xcb, 0x9f, 0xab)
+    window.draw(btn)
+    buttons << {:reject, btn.global_bounds}
+  end
 
   fields.each do |field, _|
     window.draw(field)
   end
 
-  # draw code field rect
-  code_bgrect = SF::RectangleShape.new
-  code_bgrect.position = SF.vector2f(origin.x - padding.x, code_field.@view.position.y - CODE_MARGIN_Y//2)
-  code_bgrect.fill_color = SF::Color.new(0x32, 0x32, 0x32)
-  code_bgrect.size = bgrect.size - SF.vector2f(0, fields.max_of(&.[1].size.y) + CODE_MARGIN_Y + 5)
-  window.draw(code_bgrect)
+  if code_field_was_opened
+    # draw code field rect
+    code_bgrect = SF::RectangleShape.new
+    code_bgrect.position = SF.vector2f(origin.x - padding.x, code_field.@view.position.y - CODE_MARGIN_Y//2)
+    code_bgrect.fill_color = SF::Color.new(0x32, 0x32, 0x32)
+    code_bgrect.size = bgrect.size - SF.vector2f(0, fields.max_of(&.[1].size.y) + CODE_MARGIN_Y + 5)
+    window.draw(code_bgrect)
 
-  sep = SF::RectangleShape.new
-  sep.position = code_bgrect.position - SF.vector2f(0, 2)
-  sep.size = SF.vector2f(bgrect.size.x, 1)
-  sep.fill_color = SF::Color.new(0x61, 0x61, 0x61)
-  window.draw(sep)
+    sep = SF::RectangleShape.new
+    sep.position = code_bgrect.position - SF.vector2f(0, 2)
+    sep.size = SF.vector2f(bgrect.size.x, 1)
+    sep.fill_color = SF::Color.new(0x61, 0x61, 0x61)
+    window.draw(sep)
 
-  window.draw(code_field)
+    window.draw(code_field)
+  end
 
   window.display
 end
@@ -466,21 +543,26 @@ end
 #
 # TODO: draw gray-ish (lifted) background rect outline [x]
 # TODO: draw background rect under buffer with outline (2 x lifted) [x]
-# TODO: draw accept/reject buttons to the left of the background [ ]
-# TODO: alternatively (via a flag), draw green rect to the left of the background [ ]
-# TODO: do not draw buffer if it is empty and the user didn't navigate into it yet [ ]
+# TODO: draw accept/reject buttons to the left of the background [x]
+# TODO: alternatively (via a 'sync' flag), draw green rect to the left of the background [x]
+# TODO: print message when accept/reject is clicked [x]
+# TODO: do not draw buffer if it is empty and the user didn't navigate into it yet [x]
 #
-# TODO: extract component RuleEditor, KeywordRuleEditor, HeartbeatRuleEditor etc. [ ]
-#       make them take and talk to and edit corresponding rule objects
+# TODO: extract component RuleEditor, KeywordRuleEditor, HeartbeatRuleEditor etc. with models,
+#       make models take and talk to and edit corresponding rule objects (via pressing
+#       accept/reject after edits [accept = C-s]; and monitoring whether model content == rule object content) [ ]
 # TODO: highlight keyword in different color even when unfocused [ ]
 # TODO: support validation of input fields with red highlight and pointy error [ ]
 #   keyword -- anything
 #   params -- letters followed by symbols
 #   heartbeat time -- digits followed by s or ms
 #
+# TODO: compactify the design [ ]
 # TODO: draw multiple RuleEditors in a row [ ]
 # TODO: when Up is pressed at start in ruleeditor, move to the ruleeditor above [ ]
 # TODO: when Down is pressed at end in ruleeditor, move to the ruleeditor below [ ]
+# TODO: when C-home is pressed move to first ruleeditor's home [ ]
+# TODO: when C-end is pressed move to last ruleeditor's end [ ]
 # TODO: there is always an empty rule at the bottom.when it is filled a new empty
 # rule is created below [ ]
 # TODO: extract component ProtocolEditor [ ]
