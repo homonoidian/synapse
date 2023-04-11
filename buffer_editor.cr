@@ -459,122 +459,10 @@ end
 
 # An isolated, user-friendly, single-cursor `TextBuffer` editor.
 #
-# * Receives and executes high-level `Action`s.
+# * Receives and executes SFML events.
 # * Can be drawn like any other SFML drawable.
 class BufferEditor
   include SF::Drawable
-
-  module Action
-    abstract def do(state)
-  end
-
-  # See `BufferEditorState#delete`.
-  record Action::Delete, wordstep : Bool, translation = 0 do
-    include Action
-
-    def do(state)
-      state.delete(wordstep, translation)
-    end
-  end
-
-  # See `BufferEditorState#insert`.
-  record Action::Insert, printable : String do
-    include Action
-
-    def do(state)
-      state.insert(printable)
-    end
-  end
-
-  # See `BufferEditorState#newline`.
-  record Action::InsertNewline do
-    include Action
-
-    def do(state)
-      state.newline
-    end
-  end
-
-  # See `BufferEditorState#indent`.
-  record Action::InsertIndent do
-    include Action
-
-    def do(state)
-      state.indent
-    end
-  end
-
-  # See `BufferEditorState#to_left_bound`.
-  record Action::ToLeftBound, wordstep : Bool do
-    include Action
-
-    def do(state)
-      state.to_left_bound(wordstep)
-    end
-  end
-
-  # See `BufferEditorState#to_right_bound`.
-  record Action::ToRightBound, wordstep : Bool do
-    include Action
-
-    def do(state)
-      state.to_right_bound(wordstep)
-    end
-  end
-
-  # See `BufferEditorState#to_line_above`.
-  record Action::ToLineAbove do
-    include Action
-
-    def do(state)
-      state.to_line_above
-    end
-  end
-
-  # See `BufferEditorState#to_line_below`.
-  record Action::ToLineBelow do
-    include Action
-
-    def do(state)
-      state.to_line_below
-    end
-  end
-
-  # See `BufferEditorState#to_line_start`.
-  record Action::ToLineStart do
-    include Action
-
-    def do(state)
-      state.to_line_start
-    end
-  end
-
-  # See `BufferEditorState#to_line_end`.
-  record Action::ToLineEnd do
-    include Action
-
-    def do(state)
-      state.to_line_end
-    end
-  end
-
-  # See `BufferEditorState#to_clipboard`.
-  record Action::ToClipboard do
-    include Action
-
-    def do(state)
-      state.to_clipboard
-    end
-  end
-
-  # See `BufferEditorState#from_clipboard`.
-  record Action::FromClipboard do
-    include Action
-
-    def do(state)
-      state.from_clipboard
-    end
-  end
 
   # Returns whether this editor is focused.
   getter? focused : Bool
@@ -622,11 +510,49 @@ class BufferEditor
     refresh
   end
 
-  # Updates editor state using *action*.
-  def execute(action : Action)
-    action.do(@state)
+  # Handles the given SFML *event*.
+  def handle(event : SF::Event::KeyPressed)
+    return unless focused?
+
+    case event.code
+    when .delete?    then @state.delete(wordstep: event.control, translation: 0)
+    when .backspace? then @state.delete(wordstep: event.control, translation: -1)
+    when .enter?     then @state.newline
+    when .tab?       then @state.indent
+    when .left?      then @state.to_left_bound(wordstep: event.control)
+    when .right?     then @state.to_right_bound(wordstep: event.control)
+    when .up?        then @state.to_line_above
+    when .down?      then @state.to_line_below
+    when .home?      then @state.to_line_start
+    when .end?       then @state.to_line_end
+    when .c?
+      return unless event.control
+
+      @state.to_clipboard
+    when .v?
+      return unless event.control
+
+      @state.from_clipboard
+    end
 
     refresh
+  end
+
+  # :ditto:
+  def handle(event : SF::Event::TextEntered)
+    return unless focused?
+
+    chr = event.unicode.chr
+
+    return unless chr.printable?
+
+    @state.insert(chr)
+
+    refresh
+  end
+
+  # :ditto:
+  def handle(event)
   end
 
   def draw(target, states)
@@ -634,5 +560,4 @@ class BufferEditor
   end
 end
 
-# TODO: Actions should be objects, not values [ ]
-# TODO: Action#prepare [ ] -> Action#do [x] -> Action#undo [ ]
+# TODO: undo/redo by copying BufferModel
