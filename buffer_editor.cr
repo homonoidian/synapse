@@ -443,8 +443,8 @@ class BufferEditorView
 
   def draw(target, states)
     if active?
-      @beam.draw(target, states)
       @beam.fill_color = beam_color
+      @beam.draw(target, states)
     end
 
     @text.fill_color = text_color
@@ -461,9 +461,6 @@ abstract class BufferEditorCollection
 
   # Returns whether this editor is focused.
   getter? focused = false
-
-  # Yields views which should be drawn.
-  abstract def each_view(& : BufferEditorView ->)
 
   # Yields states which should execute actions corresponding
   # to events.
@@ -536,18 +533,20 @@ abstract class BufferEditorCollection
   # :ditto:
   def handle(event)
   end
-
-  def draw(target, states)
-    each_view &.draw(target, states)
-  end
 end
 
-# An isolated, user-friendly, single-cursor `TextBuffer` editor.
+# A `BufferEditor`-like controller implementation.
 #
-# * Receives and executes SFML events.
-# * Can be drawn like any other SFML drawable.
-class BufferEditor < BufferEditorCollection
-  def initialize(@state : BufferEditorState, @view : BufferEditorView)
+# Requires `State` to implement the following methods:
+#
+#   * `clear` to clear the state
+#
+# Requires `View` to implement the following methods:
+#
+#   * `active?`, `active=` to set whether the view is active
+#   * `update(state)` to receive an update from `State`
+abstract class BufferController(State, View) < BufferEditorCollection
+  def initialize(@state : State, @view : View)
     @focused = @view.active?
 
     refresh
@@ -575,12 +574,18 @@ class BufferEditor < BufferEditorCollection
     refresh
   end
 
-  def each_state(& : BufferEditorState ->)
-    yield @state
+  def draw(target, states)
+    @view.draw(target, states)
   end
+end
 
-  def each_view(& : BufferEditorView ->)
-    yield @view
+# An isolated, user-friendly, single-cursor `TextBuffer` editor.
+#
+# * Receives and executes SFML events.
+# * Can be drawn like any other SFML drawable.
+class BufferEditor < BufferController(BufferEditorState, BufferEditorView)
+  def each_state(& : State ->)
+    yield @state
   end
 end
 
