@@ -1154,8 +1154,8 @@ end
 # and are later converted into `BirthRule`s.
 #
 # ```synapse
-# -- The following Lua code will be stored under the born
-# -- block/born rule.
+# -- The following Lua code will be stored under the birth
+# -- block/birth rule.
 # x = 123
 # y = 456
 # z = "hello world"
@@ -1432,7 +1432,6 @@ class ProtocolEditor
 
   def draw(target, states)
     @origin = origin = @cell.mid + @cell.class.radius * 1.1
-
     @editor_view.position = (origin + 15.at(15)).sfi
 
     extent = @editor_view.size + SF.vector2f(30, 30)
@@ -1806,12 +1805,7 @@ class Cell < RoundEntity
     nil
   end
 
-  @handled = Set(UUID).new
-
   def receive(vesicle : Vesicle, in tank : Tank)
-    return if vesicle.message.id.in?(@handled)
-
-    @handled << vesicle.message.id
     @protocol.answer(receiver: self, vesicle: vesicle)
   rescue CommitSuicide
     suicide(in: tank)
@@ -3126,6 +3120,7 @@ class App
     # Draw tank.
     #
     @editor.clear(SF::Color.new(0x21, 0x21, 0x21, 0xff))
+
     @tank.draw(:entropy, @editor) if heightmap?
     @tank.draw(:entities, @editor)
     @tank.draw(:actors, @scene_window)
