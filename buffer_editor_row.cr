@@ -353,7 +353,9 @@ end
 # The selected editor can be sliced in half by pressing Tab.
 # Tabbing at the beginning or end will result in an empty
 # half before or after the cursor, correspondingly.
-class BufferEditorRow < BufferController(BufferEditorRowState, BufferEditorRowView)
+class BufferEditorRow < BufferEditorCollection
+  include MonoBufferController(BufferEditorRowState, BufferEditorRowView)
+
   # Returns nil if when any missing method is called.
   private struct Ignore
     macro method_missing(call)

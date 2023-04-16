@@ -535,17 +535,16 @@ abstract class BufferEditorCollection
   end
 end
 
-# A `BufferEditor`-like controller implementation.
+# A single view, single model buffer editor controller. May or
+# may not work for you. Remember you can always subclass
+# `BufferEditorCollection`.
 #
-# Requires `State` to implement the following methods:
+# Requires the following methods to be implemented:
 #
-#   * `clear` to clear the state
-#
-# Requires `View` to implement the following methods:
-#
-#   * `active?`, `active=` to set whether the view is active
-#   * `update(state)` to receive an update from `State`
-abstract class BufferController(State, View) < BufferEditorCollection
+# * `State#clear` to clear the state.
+# * `View#active?`, `View#active=` to query/set whether the view is active.
+# * `View#update(state : State)` to update the view from the given state.
+module MonoBufferController(State, View)
   def initialize(@state : State, @view : View)
     @focused = @view.active?
 
@@ -583,7 +582,9 @@ end
 #
 # * Receives and executes SFML events.
 # * Can be drawn like any other SFML drawable.
-class BufferEditor < BufferController(BufferEditorState, BufferEditorView)
+class BufferEditor < BufferEditorCollection
+  include MonoBufferController(BufferEditorState, BufferEditorView)
+
   def each_state(& : State ->)
     yield @state
   end
