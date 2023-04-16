@@ -13,11 +13,6 @@ class BufferEditorState
     @buffer = TextBuffer.new(value)
   end
 
-  # Returns the string content of this state.
-  def string : String
-    @buffer.string
-  end
-
   # Primitive: updates the buffer.
   #
   # **Unchecked**: may invalidate the state. Make sure to
@@ -457,26 +452,25 @@ class BufferEditorView
   end
 end
 
-# An isolated, user-friendly, single-cursor `TextBuffer` editor.
+# Support for control over multiple buffer editors.
 #
-# * Receives and executes SFML events.
-# * Can be drawn like any other SFML drawable.
-class BufferEditor
+# A single editor is a subclass of editor collection. For a
+# working implementation see `BufferEditor`.
+abstract class BufferEditorCollection
   include SF::Drawable
 
   # Returns whether this editor is focused.
-  getter? focused : Bool
+  getter? focused = false
 
-  def initialize(@state : BufferEditorState, @view : BufferEditorView)
-    @focused = @view.active?
+  # Yields views which should be drawn.
+  abstract def each_view(& : BufferEditorView ->)
 
-    refresh
-  end
+  # Yields states which should execute actions corresponding
+  # to events.
+  abstract def each_state(& : BufferEditorState ->)
 
   # Updates the view according to the state.
-  def refresh
-    @view.update(@state)
-  end
+  abstract def refresh
 
   # Returns whether this editor can accept focus.
   def can_focus?
@@ -489,50 +483,38 @@ class BufferEditor
   end
 
   # Accepts focus.
-  def focus
-    @view.active = true
-
-    refresh
-  end
+  abstract def focus
 
   # Releases focus.
-  def blur
-    @view.active = false
-
-    refresh
-  end
+  abstract def blur
 
   # **Destructive**: wipes out the content of this editor *and*
   # the underlying text buffer.
-  def clear
-    @state.clear
-
-    refresh
-  end
+  abstract def clear
 
   # Handles the given SFML *event*.
   def handle(event : SF::Event::KeyPressed)
     return unless focused?
 
     case event.code
-    when .delete?    then @state.delete(wordstep: event.control, translation: 0)
-    when .backspace? then @state.delete(wordstep: event.control, translation: -1)
-    when .enter?     then @state.newline
-    when .tab?       then @state.indent
-    when .left?      then @state.to_left_bound(wordstep: event.control)
-    when .right?     then @state.to_right_bound(wordstep: event.control)
-    when .up?        then @state.to_line_above
-    when .down?      then @state.to_line_below
-    when .home?      then @state.to_line_start
-    when .end?       then @state.to_line_end
+    when .delete?    then each_state &.delete(wordstep: event.control, translation: 0)
+    when .backspace? then each_state &.delete(wordstep: event.control, translation: -1)
+    when .enter?     then each_state &.newline
+    when .tab?       then each_state &.indent
+    when .left?      then each_state &.to_left_bound(wordstep: event.control)
+    when .right?     then each_state &.to_right_bound(wordstep: event.control)
+    when .up?        then each_state &.to_line_above
+    when .down?      then each_state &.to_line_below
+    when .home?      then each_state &.to_line_start
+    when .end?       then each_state &.to_line_end
     when .c?
       return unless event.control
 
-      @state.to_clipboard
+      each_state &.to_clipboard
     when .v?
       return unless event.control
 
-      @state.from_clipboard
+      each_state &.from_clipboard
     end
 
     refresh
@@ -546,7 +528,7 @@ class BufferEditor
 
     return unless chr.printable?
 
-    @state.insert(chr)
+    each_state &.insert(chr)
 
     refresh
   end
@@ -556,7 +538,49 @@ class BufferEditor
   end
 
   def draw(target, states)
-    @view.draw(target, states)
+    each_view &.draw(target, states)
+  end
+end
+
+# An isolated, user-friendly, single-cursor `TextBuffer` editor.
+#
+# * Receives and executes SFML events.
+# * Can be drawn like any other SFML drawable.
+class BufferEditor < BufferEditorCollection
+  def initialize(@state : BufferEditorState, @view : BufferEditorView)
+    @focused = @view.active?
+
+    refresh
+  end
+
+  def refresh
+    @view.update(@state)
+  end
+
+  def focus
+    @view.active = true
+
+    refresh
+  end
+
+  def blur
+    @view.active = false
+
+    refresh
+  end
+
+  def clear
+    @state.clear
+
+    refresh
+  end
+
+  def each_state(& : BufferEditorState ->)
+    yield @state
+  end
+
+  def each_view(& : BufferEditorView ->)
+    yield @view
   end
 end
 

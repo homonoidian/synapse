@@ -44,9 +44,14 @@ class InputFieldView < BufferEditorView
     active? ? super : SF::Color.new(0xBD, 0xBD, 0xBD)
   end
 
+  # Returns the color of the underline.
+  def underline_color
+    beam_color
+  end
+
   # Returns the size of this field.
   def size
-    SF.vector2i(@max_width || Math.max(@text.width, @min_width), line_height)
+    SF.vector2i(@max_width || Math.max(@text.width, @min_width), line_height + 4)
   end
 
   def draw(target, states)
@@ -97,13 +102,13 @@ class InputFieldView < BufferEditorView
     return unless active?
 
     #
-    # Draw background rectangle.
+    # Draw underline rectangle.
     #
-    bgrect = SF::RectangleShape.new
-    bgrect.fill_color = beam_color
-    bgrect.position = position + SF.vector2f(0, size.y + font_size//2)
-    bgrect.size = SF.vector2f(size.x, 1)
-    bgrect.draw(target, states)
+    underline = SF::RectangleShape.new
+    underline.fill_color = underline_color
+    underline.position = position + SF.vector2f(0, size.y)
+    underline.size = SF.vector2f(size.x, 1)
+    underline.draw(target, states)
   end
 end
 
