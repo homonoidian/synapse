@@ -452,129 +452,50 @@ class BufferEditorView
   end
 end
 
-# Support for control over multiple buffer editors.
+# Provides the includer with a suite of `handle!` methods for
+# controlling a `BufferEditorState`.
 #
-# A single editor is a subclass of editor collection. For a
-# working implementation see `BufferEditor`.
-abstract class BufferEditorCollection
-  include SF::Drawable
-
-  # Returns whether this editor is focused.
-  getter? focused = false
-
-  # Yields states which should execute actions corresponding
-  # to events.
-  abstract def each_state(& : BufferEditorState ->)
-
-  # Updates the view according to the state.
-  abstract def refresh
-
-  # Returns whether this editor can accept focus.
-  def can_focus?
-    true
-  end
-
-  # Returns whether this editor can release focus.
-  def can_blur?
-    true
-  end
-
-  # Accepts focus.
-  abstract def focus
-
-  # Releases focus.
-  abstract def blur
-
-  # **Destructive**: wipes out the content of this editor *and*
-  # the underlying text buffer.
-  abstract def clear
-
-  # Handles the given SFML *event*.
-  def handle(event : SF::Event::KeyPressed)
-    return unless focused?
-
+# The provided methods **do not** manage focus.
+module BufferEditorHandler
+  # Applies *event* to the given buffer editor *ed*.
+  def handle!(ed : BufferEditorState, event : SF::Event::KeyPressed)
     case event.code
-    when .delete?    then each_state &.delete(wordstep: event.control, translation: 0)
-    when .backspace? then each_state &.delete(wordstep: event.control, translation: -1)
-    when .enter?     then each_state &.newline
-    when .tab?       then each_state &.indent
-    when .left?      then each_state &.to_left_bound(wordstep: event.control)
-    when .right?     then each_state &.to_right_bound(wordstep: event.control)
-    when .up?        then each_state &.to_line_above
-    when .down?      then each_state &.to_line_below
-    when .home?      then each_state &.to_line_start
-    when .end?       then each_state &.to_line_end
+    when .delete?    then ed.delete(wordstep: event.control, translation: 0)
+    when .backspace? then ed.delete(wordstep: event.control, translation: -1)
+    when .enter?     then ed.newline
+    when .tab?       then ed.indent
+    when .left?      then ed.to_left_bound(wordstep: event.control)
+    when .right?     then ed.to_right_bound(wordstep: event.control)
+    when .up?        then ed.to_line_above
+    when .down?      then ed.to_line_below
+    when .home?      then ed.to_line_start
+    when .end?       then ed.to_line_end
     when .c?
       return unless event.control
 
-      each_state &.to_clipboard
+      ed.to_clipboard
     when .v?
       return unless event.control
 
-      each_state &.from_clipboard
+      ed.from_clipboard
     end
 
     refresh
   end
 
   # :ditto:
-  def handle(event : SF::Event::TextEntered)
-    return unless focused?
-
+  def handle!(ed : BufferEditorState, event : SF::Event::TextEntered)
     chr = event.unicode.chr
 
     return unless chr.printable?
 
-    each_state &.insert(chr)
+    ed.insert(chr)
 
     refresh
   end
 
   # :ditto:
-  def handle(event)
-  end
-end
-
-# A single view, single model buffer editor controller. May or
-# may not work for you. Remember you can always subclass
-# `BufferEditorCollection`.
-#
-# Requires the following methods to be implemented:
-#
-# * `State#clear` to clear the state.
-# * `View#active?`, `View#active=` to query/set whether the view is active.
-# * `View#update(state : State)` to update the view from the given state.
-module MonoBufferController(State, View)
-  def initialize(@state : State, @view : View)
-    @focused = @view.active?
-
-    refresh
-  end
-
-  def refresh
-    @view.update(@state)
-  end
-
-  def focus
-    @view.active = true
-
-    refresh
-  end
-
-  def blur
-    @view.active = false
-
-    refresh
-  end
-
-  def clear
-    @state.clear
-
-    refresh
-  end
-
-  def draw(target, states)
-    @view.draw(target, states)
+  def handle!(ed : BufferEditorState, event : SF::Event)
   end
 end
 
@@ -582,12 +503,9 @@ end
 #
 # * Receives and executes SFML events.
 # * Can be drawn like any other SFML drawable.
-class BufferEditor < BufferEditorCollection
+class BufferEditor
   include MonoBufferController(BufferEditorState, BufferEditorView)
-
-  def each_state(& : State ->)
-    yield @state
-  end
+  include BufferEditorHandler
 end
 
 # TODO: undo/redo by copying BufferModel

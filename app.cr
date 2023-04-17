@@ -15,6 +15,7 @@ require "open-simplex-noise"
 require "./ext"
 require "./line"
 require "./buffer"
+require "./controller"
 require "./buffer_editor"
 
 FONT        = SF::Font.from_memory({{read_file("./fonts/code/scientifica.otb")}}.to_slice)
@@ -3287,6 +3288,7 @@ end
 # [x] read entropy using entropy()
 # [x] add visualization for "entropy"; toggle on C-j
 # [x] introduce ascend() to select whether a cell should climb up/down
+# [ ] use fixed zoom steps for text rendering without fp errors
 # [ ] support clone using C-Middrag
 # [ ] wormhole wire -- listen at both ends, teleport to the opposite end
 #     represented by two circles "regions" at both ends connected by a 1px line
