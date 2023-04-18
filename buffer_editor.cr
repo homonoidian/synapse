@@ -312,7 +312,7 @@ class BufferEditorState
   private def delete_word(index : Int32)
     is_before_cursor = index < @cursor
 
-    i1 = is_before_cursor ? @buffer.word_begin_at(index) : @buffer.word_end_at(index)
+    i1 = is_before_cursor ? @buffer.word_begin_at(index) : @buffer.word_end_at(index) - 1
     i2 = index
 
     return unless i1.in?(start_index..end_index) && i2.in?(start_index..end_index)
