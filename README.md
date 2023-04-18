@@ -1,6 +1,6 @@
 # Synapse
 
-[A TOTALLY USELESS 1MIN GIF](./totallyUseless.gif)
+![A TOTALLY USELESS 1MIN GIF](./totallyUseless.gif)
 
 Read the horrible first draft dot pdf to learn more but beware this thing may
 die any moment.
