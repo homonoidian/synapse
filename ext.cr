@@ -17,6 +17,12 @@ class SF::Text
   end
 end
 
+struct SF::Vector2(T)
+  def max(other : SF::Vector2(T))
+    SF.vector2f(Math.max(x, other.x), Math.max(y, other.y))
+  end
+end
+
 # Represents a two-dimensional vector.
 struct Vector2
   getter x : Float64

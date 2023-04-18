@@ -378,7 +378,7 @@ class BufferEditorView
     nxt = find_character_pos(instant.cursor + 1)
 
     @beam.position = cur + beam_margin
-    @beam.size = SF.vector2f(Math.max(4, nxt.x - cur.x), font_size)
+    @beam.size = SF.vector2f(Math.max(5, nxt.x - cur.x), font_size)
   end
 
   # Synchronizes the contents of this view according to *state*.

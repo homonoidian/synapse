@@ -43,13 +43,19 @@ class BufferEditorColumnView < DimensionView(BufferEditorRowView, BufferEditorCo
   end
 
   def arrange_cons_pair(left : BufferEditorRowView, right : BufferEditorRowView)
-    right.position = SF.vector2f(left.position.x, left.position.y + left.size.y + wsheight)
+    right.position = SF.vector2f(
+      left.position.x,
+      left.position.y + left.size.y + wsheight
+    )
   end
 
   def size : SF::Vector2f
     return SF.vector2f(0, 0) if @views.empty?
 
-    SF.vector2f(@views.max_of(&.size.x), @views.sum(&.size.y) + wsheight * (@views.size - 1))
+    SF.vector2f(
+      @views.max_of(&.size.x),
+      @views.sum(&.size.y) + wsheight * (@views.size - 1)
+    )
   end
 end
 
@@ -70,15 +76,21 @@ module BufferEditorColumnHandler
     s = row.first_selected? && row.cursor_at_start? ? event.code : Ignore.new
     e = row.last_selected? && row.cursor_at_end? ? event.code : Ignore.new
 
-    case {event.code, s, e}
-    when {.enter?, _, _}     then column.split(backwards: event.shift)
-    when {.up?, _, _}        then column.to_prev
-    when {.down?, _, _}      then column.to_next
-    when {_, .home?, _}      then column.to_first
-    when {_, _, .end?}       then column.to_last
-    when {_, .backspace?, _} then column.merge(forward: false)
-    when {_, _, .delete?}    then column.merge(forward: true)
-    else
+    begin
+      case {event.code, s, e}
+      when {.enter?, _, _}     then column.split(backwards: event.shift)
+      when {_, .home?, _}      then column.to_first
+      when {_, _, .end?}       then column.to_last
+      when {_, .left?, _}      then column.to_prev
+      when {_, _, .right?}     then column.to_next
+      when {_, .backspace?, _} then column.merge(forward: false)
+      when {_, _, .delete?}    then column.merge(forward: true)
+      else
+        return handle!(row, event)
+      end
+    rescue DimensionOverflowException | DimensionUnderflowException
+      # In case of underflow/overflow simply redirect to the
+      # selected row.
       return handle!(row, event)
     end
 

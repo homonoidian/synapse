@@ -13,6 +13,10 @@ record BufferEditorRowInstant,
 # Controls a row of `BufferEditorState`s with one currently
 # `selected` state.
 class BufferEditorRowState < DimensionState(BufferEditorState)
+  def sepsize
+    1
+  end
+
   def new_substate_for(index : Int) : BufferEditorState
     BufferEditorState.new
   end
@@ -45,13 +49,42 @@ class BufferEditorRowState < DimensionState(BufferEditorState)
     selected.update! { |it| it + string }
   end
 
-  # Returns cursor index *as if the row was a single field*.
+  # Returns cursor index *as if this row was a single buffer editor*.
   #
-  # Raises if there are no editor states.
+  # Returns 0 if there are no editor states.
   def cursor
+    return 0 if empty?
+
     cursor = selected.capture.cursor
     cursor += (first_index...@selected).sum { |n| nth(n).size + 1 }
     cursor
+  end
+
+  # Sets cursor index *as if this row was a single buffer editor*.
+  #
+  # Does nothing if there are no editor states. Moves the cursor
+  # to the last character of the last editor state if *other*
+  # exceeds the total amount of characters in this row, including
+  # whitespace separators.
+  def cursor=(other : Int)
+    return if empty?
+
+    (0...@states.size).accumulate(0) do |offset, index|
+      state = @states[index]
+
+      if other.in?(offset..offset + state.size)
+        to_nth(index)
+
+        state.to_start_index
+        state.to_column Math.min(other - offset, state.line.size)
+
+        return
+      end
+
+      offset + state.size + sepsize
+    end
+
+    to_last
   end
 end
 
@@ -63,18 +96,24 @@ class BufferEditorRowView < DimensionView(BufferEditorView, BufferEditorRowInsta
     6
   end
 
-  def size : SF::Vector2f
-    return SF.vector2f(0, 0) if @views.empty?
-
-    SF.vector2f(@views.sum(&.size.x) + wswidth * (@views.size - 1), @views.max_of(&.size.y))
-  end
-
   def new_subview_for(index : Int) : BufferEditorView
     BufferEditorView.new
   end
 
   def arrange_cons_pair(left : BufferEditorView, right : BufferEditorView)
-    right.position = SF.vector2f(left.position.x + left.size.x + wswidth, left.position.y)
+    right.position = SF.vector2f(
+      left.position.x + left.size.x + wswidth,
+      left.position.y
+    )
+  end
+
+  def size : SF::Vector2f
+    return SF.vector2f(0, 0) if @views.empty?
+
+    SF.vector2f(
+      @views.sum(&.size.x) + wswidth * (@views.size - 1),
+      @views.max_of(&.size.y)
+    )
   end
 end
 
@@ -93,15 +132,21 @@ module BufferEditorRowHandler
     s = row.cursor_at_start? ? event.code : Ignore.new
     e = row.cursor_at_end? ? event.code : Ignore.new
 
-    case {event.code, s, e}
-    when {.tab?, _, _}       then row.split(backwards: event.shift)
-    when {_, .left?, _}      then row.to_prev
-    when {_, _, .right?}     then row.to_next
-    when {_, .home?, _}      then row.to_first
-    when {_, _, .end?}       then row.to_last
-    when {_, .backspace?, _} then row.merge(forward: false)
-    when {_, _, .delete?}    then row.merge(forward: true)
-    else
+    begin
+      case {event.code, s, e}
+      when {.tab?, _, _}       then row.split(backwards: event.shift)
+      when {_, .left?, _}      then row.to_prev
+      when {_, _, .right?}     then row.to_next
+      when {_, .home?, _}      then row.to_first
+      when {_, _, .end?}       then row.to_last
+      when {_, .backspace?, _} then row.merge(forward: false)
+      when {_, _, .delete?}    then row.merge(forward: true)
+      else
+        return handle!(row.selected, event)
+      end
+    rescue DimensionOverflowException | DimensionUnderflowException
+      # In case of underflow/overflow simply redirect to the
+      # selected editor.
       return handle!(row.selected, event)
     end
 

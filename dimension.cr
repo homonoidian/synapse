@@ -1,9 +1,21 @@
+# Raised when a dimension is asked to exceed its maximum number
+# of states.
+class DimensionOverflowException < Exception
+end
+
+# Raised when a dimension is asked to shrink below the minimum
+# number of states.
+class DimensionUnderflowException < Exception
+end
+
 # Generic control logic for a dimension (e.g. row, column) of
 # `State`s with one currently `selected` `State`.
 abstract class DimensionState(State)
   def initialize
     @states = [] of State
     @selected = 0
+
+    min_size.times { append }
   end
 
   # Builds and returns a new, *index*-th subordinate `State`.
@@ -13,20 +25,44 @@ abstract class DimensionState(State)
   # subordinate state.
   abstract def new_substate_for(index : Int) : State
 
-  # Captures and returns an instant of this editor dimension.
+  # Captures and returns an instant of this dimension.
   #
   # Useful for undo/redo.
   abstract def capture
 
-  # Returns whether there are currently no editors in this
-  # editor dimension.
+  # Returns whether there are currently no states in this dimension.
   def empty?
     size.zero?
   end
 
-  # Returns the amount of editors in this editor dimension.
+  # Returns the amount of states in this dimension.
   def size
     @states.size
+  end
+
+  # Returns the amount of characters taken by the separator
+  # between states (if any).
+  def sepsize
+    0
+  end
+
+  # Specifies the minimum amount of states in this dimension.
+  #
+  # When created, this dimension will be filled with the
+  # specified number of states.
+  #
+  # When this dimension has exactly `min_size` subordinate
+  # states, no further deletions are going to be allowed.
+  def min_size
+    0
+  end
+
+  # Specifies the maximum amount of states in this dimension.
+  #
+  # Beyond this number, no further state additions are going
+  # to be allowed.
+  def max_size
+    size + 1
   end
 
   # Returns the index of the first state.
@@ -36,10 +72,10 @@ abstract class DimensionState(State)
 
   # Returns the index of the last state.
   def last_index
-    @states.size - 1
+    size - 1
   end
 
-  # Clamps *index* in the bounds of this editor dimension.
+  # Clamps *index* in the bounds of this dimension.
   def clamp(index : Int)
     index.clamp(first_index..last_index)
   end
@@ -115,7 +151,12 @@ abstract class DimensionState(State)
   end
 
   # Adds the given *state* before *index*. Returns *state*.
+  #
+  # Raises `DimensionOverflowException` if it was not appended
+  # due to size restrictions.
   def append(index : Int, state : State) : State
+    raise DimensionOverflowException.new if size == max_size
+
     @states.insert(index, state)
 
     state
@@ -123,7 +164,12 @@ abstract class DimensionState(State)
 
   # Appends a subordinate state (see `new_substate_for`) at
   # *index*. Returns the appended state.
+  #
+  # Raises `DimensionOverflowException` if the state cannot be
+  # appended due to size restrictions.
   def append(index : Int)
+    raise DimensionOverflowException.new if size == max_size
+
     append(index, new_substate_for(index))
   end
 
@@ -177,10 +223,17 @@ abstract class DimensionState(State)
     after_moved_right(selected)
   end
 
-  # **Destructive**: clears and drops the *index*-th state. If
-  # the selected state was dropped, the previous state is selected
-  # (if any; otherwise, the next available state is selected).
+  # **Destructive**: clears and drops the *index*-th state.
+  #
+  # If the selected state was dropped, the previous state
+  # is selected (if any; otherwise, the next available state
+  # is selected).
+  #
+  # Raises `DimensionUnderflowException` if dropping will shrink
+  # this dimension below the minimum size.
   def drop(index : Int)
+    raise DimensionUnderflowException.new if size == min_size
+
     @states[index].clear
     @states.delete_at(index)
     to_prev
@@ -195,14 +248,16 @@ abstract class DimensionState(State)
   # states, and forgets about them.
   def clear
     @states.each &.clear
-    @states.clear
     @selected = 0
+    return if size <= min_size
+
+    @states.clear_from(min_size + 1)
   end
 
   # Splits the selected state in two at the cursor.
   #
-  # If *backwards* is true, will then select the previous editor
-  # state. Otherwise, the selected state will remain unchanged.
+  # If *backwards* is true, will then select the previous state.
+  # Otherwise, the selected state will remain unchanged.
   #
   # Adds a new empty state if cursor is at either end of the
   # selected state.
@@ -232,8 +287,8 @@ abstract class DimensionState(State)
   def splitdist(left : State, right : State)
   end
 
-  # Merges the current state with the previous or next editor
-  # state, depending on whether *forward* is true or false.
+  # Merges the current state with the previous or next state,
+  # depending on whether *forward* is true or false.
   #
   # Does nothing if there are no states.
   def merge(forward : Bool)
@@ -280,10 +335,10 @@ end
 abstract class DimensionView(View, Instant, SubInstant)
   include SF::Drawable
 
-  # Returns the position of this editor row view.
+  # Returns the position of this dimension view.
   property position = SF.vector2f(0, 0)
 
-  # Returns whether this editor row view is active.
+  # Returns whether this dimension view is active.
   property? active = false
 
   def initialize
@@ -321,7 +376,7 @@ abstract class DimensionView(View, Instant, SubInstant)
     subview
   end
 
-  # Updates this editor row view from the given state *instant*.
+  # Updates this dimension view from the given state *instant*.
   def update(instant : Instant)
     @views.clear
 
@@ -342,7 +397,7 @@ abstract class DimensionView(View, Instant, SubInstant)
     @views = views
   end
 
-  # Updates this editor row view from the given *state*.
+  # Updates this dimension view from the given *state*.
   def update(state)
     update(state.capture)
   end

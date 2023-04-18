@@ -157,7 +157,7 @@ class TextBuffer
   # Find end position by going forth as far as possible, stopping
   # either on word stop characters or the first whitespace.
   def word_end_at(index : Int)
-    return size if index >= size
+    return size if index >= size - 1
 
     reader = Char::Reader.new(@string, index)
 
