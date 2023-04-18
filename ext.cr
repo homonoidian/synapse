@@ -21,6 +21,10 @@ struct SF::Vector2(T)
   def max(other : SF::Vector2(T))
     SF.vector2f(Math.max(x, other.x), Math.max(y, other.y))
   end
+
+  def to_i
+    SF.vector2f(x.to_i, y.to_i)
+  end
 end
 
 # Represents a two-dimensional vector.

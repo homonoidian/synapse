@@ -423,12 +423,12 @@ class BufferEditorView
 
   # Returns the position of this view.
   def position
-    @text.position
+    @text.position.to_i
   end
 
   # Translates this view to *position*.
   def position=(position : SF::Vector2)
-    delta = position - @text.position
+    delta = position - self.position
 
     @text.position += delta
     @beam.position += delta
@@ -436,7 +436,10 @@ class BufferEditorView
 
   # Returns the full width and height of this view.
   def size
-    @text.string.empty? ? @beam.size : @text.size
+    SF.vector2f(
+      Math.max(@beam.size.x, @text.size.x),
+      Math.max(line_height, @text.size.y)
+    ).to_i
   end
 
   # Returns the position of the character at the given *index*.

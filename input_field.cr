@@ -44,6 +44,11 @@ class InputFieldView < BufferEditorView
     active? ? super : SF::Color.new(0xBD, 0xBD, 0xBD)
   end
 
+  # Specifies whether to show the underline.
+  def underline?
+    true
+  end
+
   # Returns the color of the underline.
   def underline_color
     beam_color
@@ -99,7 +104,7 @@ class InputFieldView < BufferEditorView
       super
     end
 
-    return unless active?
+    return unless active? && underline?
 
     #
     # Draw underline rectangle.

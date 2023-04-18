@@ -11,10 +11,19 @@ require "./buffer_editor_row"
 require "./buffer_editor_column"
 require "./input_field"
 require "./input_field_row"
+require "./keyword_input"
+require "./param_input"
+require "./rule_header"
+require "./rule_code_row"
+require "./keyword_rule_header"
 
 FONT        = SF::Font.from_memory({{read_file("./fonts/code/scientifica.otb")}}.to_slice)
 FONT_BOLD   = SF::Font.from_memory({{read_file("./fonts/code/scientificaBold.otb")}}.to_slice)
 FONT_ITALIC = SF::Font.from_memory({{read_file("./fonts/code/scientificaItalic.otb")}}.to_slice)
+
+FONT.get_texture(11).smooth = false
+FONT_BOLD.get_texture(11).smooth = false
+FONT_ITALIC.get_texture(11).smooth = false
 
 FONT_UI        = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Regular.ttf")}}.to_slice)
 FONT_UI_MEDIUM = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Medium.ttf")}}.to_slice)
@@ -22,103 +31,17 @@ FONT_UI_BOLD   = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Bold.ttf")}
 
 # ----------------------------------------------------------
 
-class KeywordInputState < InputFieldState
-  def insertable?(printable : String)
-    super && !(' '.in?(printable) || '\t'.in?(printable))
-  end
-end
-
-class ParamInputState < KeywordInputState
-end
-
-class KeywordInputView < InputFieldView
-  def font
-    FONT_ITALIC
-  end
-
-  def underline_color
-    SF::Color.new(0xcf, 0x89, 0x9f)
-  end
-
-  def beam_color
-    SF::Color.new(0xfa, 0xb1, 0xc7)
-  end
-
-  def text_color
-    SF::Color.new(0xcf, 0x89, 0x9f)
-  end
-end
-
-# ----------------------------------------------------------
-
-class RuleHeaderState < InputFieldRowState
-  def min_size
-    1
-  end
-
-  def new_substate_for(index : Int)
-    index == 0 ? KeywordInputState.new : ParamInputState.new
-  end
-end
-
-class RuleHeaderView < InputFieldRowView
-  property padding = SF.vector2f(8, 3)
-
-  def new_subview_for(index : Int)
-    index == 0 ? KeywordInputView.new : super
-  end
-
-  def origin
-    position + padding
-  end
-
-  def size : SF::Vector2f
-    super + padding * 2
-  end
-end
-
-class RuleCodeView < BufferEditorRowView
-  property padding_x = SF.vector2f(8, 8)
-  property padding_y = SF.vector2f(0, 6)
-
-  def origin
-    position + SF.vector2f(padding_x.x, padding_y.x)
-  end
-
-  def size
-    super + SF.vector2f(padding_x.x + padding_x.y, padding_y.x + padding_y.y)
-  end
-end
-
-# ----------------------------------------------------------
-
-class CodeEditorState < BufferEditorRowState
-  def min_size
-    1
-  end
-
-  def max_size
-    1
-  end
-end
-
 class RuleEditorState < BufferEditorColumnState
   def min_size
-    1
+    1 # Rule header
   end
 
   def max_size
-    2
+    2 # Rule header & rule code
   end
 
   def new_substate_for(index : Int)
-    case index
-    when 0
-      row = RuleHeaderState.new
-      row
-    else
-      CodeEditorState.new
-    end
+    {KeywordRuleHeaderState, RuleCodeRowState}[index].new
   end
 end
 
@@ -136,12 +59,7 @@ class RuleEditorView < BufferEditorColumnView
   end
 
   def new_subview_for(index : Int)
-    case index
-    when 0 then RuleHeaderView.new
-    when 1 then RuleCodeView.new
-    else
-      raise "BUG: unreachable"
-    end
+    {KeywordRuleHeaderView, RuleCodeRowView}[index].new
   end
 
   def draw(target, states)
@@ -152,13 +70,18 @@ class RuleEditorView < BufferEditorColumnView
     bgrect.position = position
     bgrect.size = size
     bgrect.fill_color = SF::Color.new(0x31, 0x31, 0x31)
-
-    if active?
-      bgrect.outline_color = SF::Color.new(0x43, 0x51, 0x80)
-      bgrect.outline_thickness = 1
-    end
+    bgrect.outline_color = active? ? SF::Color.new(0x43, 0x51, 0x80) : SF::Color.new(0x39, 0x39, 0x39)
+    bgrect.outline_thickness = 1
 
     bgrect.draw(target, states)
+
+    if @views.size > 1
+      botrect = SF::RectangleShape.new
+      botrect.position = SF.vector2f(position.x, position.y)
+      botrect.size = SF.vector2f(size.x, @views[0].size.y)
+      botrect.fill_color = SF::Color.new(0x39, 0x39, 0x39)
+      botrect.draw(target, states)
+    end
 
     super
   end
@@ -167,6 +90,11 @@ end
 module RuleEditorHandler
   def handle!(editor : RuleEditorState, event : SF::Event::KeyPressed)
     return if editor.empty?
+
+    if event.code.escape?
+      blur
+      return
+    end
 
     # Row is rule header row or code row.
     row = editor.selected
@@ -243,8 +171,6 @@ module RuleEditorHandler
   end
 end
 
-# TODO: RuleEditor is 1x RuleHeader, 1x Code. Cannot add, cannot
-# remove -- custom RuleEditorHandler.
 class RuleEditor
   include MonoBufferController(RuleEditorState, RuleEditorView)
 
@@ -255,8 +181,34 @@ end
 
 # ----------------------------------------------------------
 
+# TODO:
+# [ ] Have a column of RuleEditors (RuleEditorColumn) where the
+#     last RuleEditor is going to be the "insertion point" -- if
+#     you type there a new empty rule editor appears below, and
+#     this one is yours to change.
 #
-# TODO: RuleEditorColumn
+# [ ] Backspace in an empty ruleeditor should remove it unless it
+#     is the last (insertion point) rule editor.
+#
+# [ ] Implement HeartbeatRule, BirthRuleEditor. ??? how to create them?
+#
+# [ ] RuleEditor can submit its RuleEditorState to an existing
+#     Rule object on C-s, can fill its RuleEditorState from an
+#     existing Rule object when not focused, when focused can
+#     observe an existing RuleObject and show sync/out of sync
+#     circle.
+#
+# [ ] Implement ProtocolEditor which is basically a big-smooth-
+#     font editable name (a subset of InputField) followed by
+#     RuleEditorColumn.
+#
+# [ ] ProtocolEditor can submit its ProtocolEditorState to an existing
+#     Protocol object on C-s, can observe & fill its ProtocolEditorState
+#     from an existing Protocol object when not focused, alternatively
+#     (when focused) show sync/out of sync circle.
+#
+# [ ] Replace the current Protocol/Rule/ProtocolEditor system
+#     with this new one.
 
 it_state = RuleEditorState.new
 it_view = RuleEditorView.new
