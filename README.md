@@ -1,4 +1,12 @@
-# synapse
+# Synapse
+
+[A TOTALLY USELESS 1MIN GIF](./totallyUseless.gif)
+
+Read the horrible first draft dot pdf to learn more but beware this thing may
+die any moment.
+
+DISCLAIMER almost nothing from the AFOREMENTIONED first horrible draft is implemented! A lot
+of yak shaving ahead because it's FUN! (it's not)
 
 TODO: Write a description here
 

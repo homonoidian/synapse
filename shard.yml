@@ -27,6 +27,12 @@ dependencies:
 development_dependencies:
   minitest:
     github: ysbaddaden/minitest.cr
+
+targets:
+  synapse:
+    main: app.cr
+  protocol-editor-prototype:
+    main: ped2.cr
 #   webmock:
 #     github: manastech/webmock.cr
 

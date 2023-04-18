@@ -3322,6 +3322,6 @@ end
 # [ ] optimize?
 # [ ] write a few examples, record using GIF
 # [ ] write README with gifs
-# [ ] upload to GH
+# [x] upload to GH
 
 App.the.run
