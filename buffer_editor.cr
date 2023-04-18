@@ -53,6 +53,11 @@ class BufferEditorState
     end_index - start_index
   end
 
+  # Returns whether there are no characters in the text buffer.
+  def empty?
+    size.zero?
+  end
+
   # Returns the index of the first character in the text buffer.
   def start_index
     0
