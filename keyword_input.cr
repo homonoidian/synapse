@@ -1,7 +1,12 @@
+# Regex that matches a valid Lua identifier.
+LUA_ID_REGEX = /^[_a-zA-Z]\w*$/
+
 # Represents the state for input fields used to enter a rule keyword.
 class KeywordInputState < InputFieldState
   def insertable?(printable : String)
-    super && !(' '.in?(printable) || '\t'.in?(printable))
+    instant = capture
+    keyword = instant.string.insert(instant.cursor, printable)
+    keyword.matches?(LUA_ID_REGEX)
   end
 end
 
