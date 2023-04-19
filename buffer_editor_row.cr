@@ -49,10 +49,11 @@ class BufferEditorRowState < DimensionState(BufferEditorState)
     selected.update! { |it| it + string }
   end
 
-  # Returns cursor index *as if this row was a single buffer editor*.
+  # Returns cursor column number *as if this row was a single
+  # buffer editor* arranged in a virtual "line".
   #
   # Returns 0 if there are no editor states.
-  def cursor
+  def column
     return 0 if empty?
 
     cursor = selected.capture.cursor
@@ -60,23 +61,23 @@ class BufferEditorRowState < DimensionState(BufferEditorState)
     cursor
   end
 
-  # Sets cursor index *as if this row was a single buffer editor*.
+  # Seeks *column* *as if this row was a single buffer editor*.
   #
   # Does nothing if there are no editor states. Moves the cursor
-  # to the last character of the last editor state if *other*
+  # to the last character of the last editor state if *column*
   # exceeds the total amount of characters in this row, including
-  # whitespace separators.
-  def cursor=(other : Int)
+  # `sepsize` per separator.
+  def to_column(column : Int)
     return if empty?
 
     (0...@states.size).accumulate(0) do |offset, index|
       state = @states[index]
 
-      if other.in?(offset..offset + state.size)
+      if column.in?(offset..offset + state.size)
         to_nth(index)
 
         state.to_start_index
-        state.to_column Math.min(other - offset, state.line.size)
+        state.to_column Math.min(column - offset, state.line.size)
 
         return
       end

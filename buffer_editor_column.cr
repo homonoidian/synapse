@@ -28,6 +28,35 @@ class BufferEditorColumnState < DimensionState(BufferEditorRowState)
   def after_moved_right(state : BufferEditorRowState)
     state.to_last
   end
+
+  # If possible, moves the cursor in the selected row to *column*.
+  #
+  # See `BufferEditorRowState#to_column`.
+  def to_column(column : Int)
+    selected.to_column(column)
+  end
+
+  # Selects the previous row, and, if possible, moves the cursor
+  # there to *column*.
+  #
+  # See `BufferEditorRowState#to_column`.
+  def to_prev_with_column(column : Int)
+    return if empty?
+
+    to_prev
+    to_column(column)
+  end
+
+  # Selects the next row, and, if possible, moves the cursor
+  # there to *column*.
+  #
+  # See `BufferEditorRowState#to_column`.
+  def to_next_with_column(column : Int)
+    return if empty?
+
+    to_next
+    to_column(column)
+  end
 end
 
 # A column of `BufferEditorRow`s.
@@ -49,13 +78,18 @@ class BufferEditorColumnView < DimensionView(BufferEditorRowView, BufferEditorCo
     )
   end
 
+  # Specifies snap grid step for size.
+  def snapstep
+    SF.vector2f(0, 0)
+  end
+
   def size : SF::Vector2f
-    return SF.vector2f(0, 0) if @views.empty?
+    return snapstep if @views.empty?
 
     SF.vector2f(
       @views.max_of(&.size.x),
       @views.sum(&.size.y) + wsheight * (@views.size - 1)
-    )
+    ).snap(snapstep)
   end
 end
 

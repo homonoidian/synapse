@@ -19,11 +19,18 @@ end
 
 struct SF::Vector2(T)
   def max(other : SF::Vector2(T))
-    SF.vector2f(Math.max(x, other.x), Math.max(y, other.y))
+    SF::Vector2(T).new(Math.max(x, other.x), Math.max(y, other.y))
+  end
+
+  def snap(snapstep : SF::Vector2(T))
+    SF::Vector2(T).new(
+      snapstep.x.zero? ? x : (x / snapstep.x).ceil * snapstep.x,
+      snapstep.y.zero? ? y : (y / snapstep.y).ceil * snapstep.y,
+    )
   end
 
   def to_i
-    SF.vector2f(x.to_i, y.to_i)
+    SF.vector2i(x.to_i, y.to_i)
   end
 end
 
