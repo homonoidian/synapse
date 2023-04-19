@@ -434,9 +434,22 @@ class BufferEditorView
     @beam.position += delta
   end
 
-  # Returns the full width and height of this view.
-  def size
+  # Specifies snap grid step.
+  def snapstep
+    SF.vector2f(40, 0)
+  end
+
+  # Snaps *vec* to the desired next `snapstep`.
+  def snap(vec : SF::Vector2)
     SF.vector2f(
+      snapstep.x.zero? ? vec.x : (vec.x / snapstep.x).ceil * snapstep.x,
+      snapstep.y.zero? ? vec.y : (vec.y / snapstep.y).ceil * snapstep.y,
+    )
+  end
+
+  # Returns the snapped full width and height of this view.
+  def size
+    snap SF.vector2f(
       Math.max(@beam.size.x, @text.size.x),
       Math.max(line_height, @text.size.y)
     ).to_i
