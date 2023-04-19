@@ -351,6 +351,12 @@ class Vesicle < RoundEntity
     1
   end
 
+  def self.drawable(color : SF::Color)
+    drawable = super
+    drawable.point_count = 5
+    drawable
+  end
+
   def decay
     @tt.progress(@decay_task_id)
   end
