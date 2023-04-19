@@ -2422,7 +2422,7 @@ class Mode::Ctrl < Mode
   end
 
   def map(app, event : SF::Event::MouseWheelScrolled)
-    app.zoom(event.delta < 0 ? 1.1 : 0.9)
+    event.delta < 0 ? app.zoom_smaller : app.zoom_bigger
 
     self
   end
@@ -2729,25 +2729,32 @@ class App
     @editor.view = @tank.follow(@editor.view)
   end
 
-  @factor = 1.0
+  ZOOMS = {0.1, 0.3, 0.5, 1.0, 1.3, 1.5, 1.7, 1.9, 2.0}
 
-  def zoom(factor : Number)
-    return unless 0.1 <= @factor * factor <= 3
+  @zoom : Int32 = ZOOMS.index!(1.0)
 
-    @factor *= factor
+  def zoom_bigger
+    @zoom = Math.max(0, @zoom - 1)
 
-    view = @editor.view
-    view.center = SF.vector2f(view.center.x.round, view.center.y.round)
+    setzoom(ZOOMS[@zoom])
+  end
+
+  def zoom_smaller
+    @zoom = Math.min(ZOOMS.size - 1, @zoom + 1)
+
+    setzoom(ZOOMS[@zoom])
+  end
+
+  def setzoom(factor : Number)
+    view = SF::View.new
+    view.center = SF.vector2f(@editor.view.center.x.round, @editor.view.center.y.round)
+    view.size = SF.vector2f(@editor.size.x, @editor.size.y)
     view.zoom(factor)
     @editor.view = view
   end
 
   def unzoom
-    @factor = 1.0
-    view = SF::View.new
-    view.center = SF.vector2f(@editor.view.center.x.round, @editor.view.center.y.round)
-    view.size = SF.vector2f(@editor.size.x, @editor.size.y)
-    @editor.view = view
+    setzoom(1.0)
   end
 
   @time = true
@@ -2841,7 +2848,7 @@ class App
           view = @editor.view
           view.size = SF.vector2f(event.width, event.height)
           view.center = SF.vector2f(view.center.x.round, view.center.y.round)
-          view.zoom(@factor)
+          view.zoom(ZOOMS[@zoom])
           @editor.view = view
 
           view = @hud.view
@@ -2949,7 +2956,7 @@ end
 #     'answer' for rules
 # [x] rename ResponseContext to ExpressionContext, move it & children
 #     to another file
-# [ ] use fixed zoom steps for text rendering without fp errors
+# [x] use fixed zoom steps for text rendering without fp errors
 # [ ] move protocol, rule, signatures to a different file
 # [ ] isolate protocol, rule, signatures
 # [ ] add heartbeatresponsecontext, attack there is circmean attacks
