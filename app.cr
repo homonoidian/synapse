@@ -1,6 +1,14 @@
 # FUN FACT: cells can move using messages
 # FUN FACT: attacking one's own messages will make the cell follow entropy mountains,
 #           evading one's own messages will make the cell follow entropy valleys
+# NOT SO FUN FACT: reading Tank#entropy() takes 30% of time in tick(). entropy is the
+#                  biggest performance crappoint because it's read for every vesicle.
+#                  when chemistries are there perhaps it'd be best to remove entropy()
+#                  for vesicles (at least do jitter(0.0) by default for them)
+# ANOTHER NOT SO FUN FACT: drawing vesicles is the second most expensive operation.
+#                  perhaps drawing them as simple pixels will help, and also reduce
+#                  the amount of vesicles drawn based on zoom level. another idea is
+#                  to add a "toggle draw vesicles" function
 
 require "lch"
 require "lua"
@@ -21,6 +29,7 @@ require "./controller"
 require "./buffer_editor"
 require "./expression_context"
 require "./protocol"
+require "./entity_collection"
 
 FONT        = SF::Font.from_memory({{read_file("./fonts/code/scientifica.otb")}}.to_slice)
 FONT_BOLD   = SF::Font.from_memory({{read_file("./fonts/code/scientificaBold.otb")}}.to_slice)
@@ -102,7 +111,6 @@ record Message, keyword : String, args : Array(Memorable), strength : Float64, d
 abstract class Entity
   include SF::Drawable
 
-  getter id : UUID
   getter tt = TimeTable.new(App.time)
 
   @decay_task_id : UUID
@@ -145,6 +153,14 @@ abstract class Entity
   end
 
   def sync
+  end
+
+  def insert_into(collection : EntityCollection)
+    collection.insert(self.class, @id, entity: self)
+  end
+
+  def delete_from(collection : EntityCollection)
+    collection.delete(self.class, @id, entity: self)
   end
 
   def tick(delta : Float, in tank : Tank)
@@ -288,7 +304,7 @@ class RoundEntity < PhysicalEntity
     drawable
   end
 
-  ANGLES = (0..12).map { |n| n * 30 }
+  ANGLES = {0, 45, 90, 135, 180, 225, 270, 315}
 
   # jitter: willingness to change elevation [0; 1]
   property jitter = 0.0
@@ -301,8 +317,10 @@ class RoundEntity < PhysicalEntity
 
     return if @jitter.zero?
 
-    min_hdg = ANGLES.min_by { |angle| tank.entropy(mid + self.class.radius + angle.dir * self.class.radius) }
-    max_hdg = ANGLES.max_by { |angle| tank.entropy(mid + self.class.radius + angle.dir * self.class.radius) }
+    entropies = ANGLES.map { |angle| {angle, tank.entropy(mid + self.class.radius + angle.dir * self.class.radius)} }
+
+    min_hdg, _ = entropies.min_by { |angle, entropy| entropy }
+    max_hdg, _ = entropies.max_by { |angle, entropy| entropy }
 
     #
     # Compute weighed mean to get heading
@@ -1340,9 +1358,9 @@ class Tank
     @space.damping = 0.3
     @space.gravity = CP.v(0, 0)
 
-    @bodies = {} of UInt64 => PhysicalEntity
-    @entities = {} of UUID => Entity
     @actors = [] of Actor
+    @entities = EntityCollection.new
+    @bodies = {} of UInt64 => PhysicalEntity
 
     @entropy = OpenSimplexNoise.new
     @stime = 1i64
@@ -1415,7 +1433,7 @@ class Tank
   end
 
   def insert(entity : Entity)
-    @entities[entity.id] = entity
+    @entities.insert(entity)
   end
 
   def insert(actor : Actor)
@@ -1434,7 +1452,7 @@ class Tank
   end
 
   def remove(entity : Entity)
-    @entities.delete(entity.id)
+    @entities.delete(entity)
   end
 
   def cell(*, to pos : Vector2)
@@ -1465,27 +1483,26 @@ class Tank
   end
 
   def each_entity
-    @entities.each_value do |entity|
+    @entities.each do |entity|
       yield entity
     end
   end
 
   def each_entity_by_z_index
-    entities = @entities.values.unstable_sort_by!(&.z_index)
-    entities.each do |entity|
+    @entities.each_by_z_index do |entity|
       yield entity
     end
   end
 
   def each_cell
-    each_entity do |entity|
-      yield entity if entity.is_a?(Cell)
+    @entities.each(Cell) do |cell|
+      yield cell
     end
   end
 
   def each_vein
-    each_entity do |entity|
-      yield entity if entity.is_a?(Vein)
+    @entities.each(Vein) do |vein|
+      yield vein
     end
   end
 
@@ -1497,16 +1514,12 @@ class Tank
     @bodies[body.object_id]?
   end
 
-  def find_cell_by_id?(id : UUID)
-    find_entity_by_id?(id).as?(Cell)
-  end
-
   def find_entity_at?(pos : Vector2)
-    each_entity { |entity| return entity if pos.in?(entity) }
+    @entities.at?(pos)
   end
 
   def find_cell_at?(pos : Vector2)
-    find_entity_at?(pos).as?(Cell)
+    @entities.at?(Cell, pos)
   end
 
   def distribute(origin : Vector2, message : Message, color : SF::Color, deadzone = Cell.radius * 1.2)
@@ -1549,9 +1562,9 @@ class Tank
   def tick(delta : Float)
     @tt.tick
     @space.step(delta)
+
     each_entity &.tick(delta, in: self)
-    # TODO: avoid going thru all entities thrice: segregate cells
-    # into another collection?
+
     each_cell &.systole(in: self)
     each_cell &.dyastole(in: self)
   end
