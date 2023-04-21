@@ -43,6 +43,62 @@ FONT_UI_BOLD   = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Bold.ttf")}
 # [ ] Backspace in an empty ruleeditor should remove it unless it
 #     is the last (insertion point) rule editor.
 #
+# ------- Alternatively:
+#
+# [ ] BirthRuleEditor
+# [ ] HeartbeatRuleEditor
+# [ ] ProtocolEditor
+# [ ] Assign each new RuleEditor a custom color
+# [ ] Have a little circle on top left of RuleEditors with this color
+#
+# "Rule world" is a world of itself (like Tank). You can drag rules
+# around, create new ones using double-click and a menu, etc.
+#
+# [ ] Implement simple menu with the following items:
+#     "Birth rule" (creates a birth rule onclick)
+#     "Heartbeat rule" (creates a heartbeat rule onclick)
+#     "Keyword rule" (creates a keyword rule onclick)
+#     "Protocol" (creates a protocol pane onclick)
+# [ ] Open this menu on double click
+# [ ] When the user starts typing with nothing selected, create
+#     a new keyword rule and redirect input there
+# [ ] When dragging *from* this little circle, draw an arrow pointing
+#     at where the cursor is. The arrow is of the custom color
+# [ ] When cursor is released over empty space, create a
+#     "protocol" pane there which will have the arrow connected
+#      to it.
+# [ ] The "protocol" pane allows to specify the name of the protocol
+#     or leave it unnamed.
+# [ ] If the cursor is over an existing protocol pane, draw a halo
+#     around it.
+# [ ] If the cursor is released over an existing protocol pane,
+#     connect the arrow to it.
+#
+# [ ] Rules can send and receive *targeted*, internal messages. I.e.,
+#     rule 'mouse' sends internal message 'foo', a single internal
+#     vesicle is emitted, *pathfinds* to message 'foo', triggers it.
+#
+#
+#                           e
+#                           l
+#                           c
+#                           i
+# +-------------+           s
+# |             |  emit     e
+# | Rule 'mouse'| +---->    V  XXXpathfind
+# |             |                X
+# +-------------+                X
+#                                X
+#                                X
+#                                X         +-------------+
+#                                X   trig  |             |
+#                                XXX +---> |  Rule 'foo' |
+#                                          |             |
+#                                          +-------------+
+#
+#
+# -------
+#
 # [ ] Implement HeartbeatRule, BirthRuleEditor. ??? how to create them?
 #
 # [ ] RuleEditor can submit its RuleEditorState to an existing

@@ -27,7 +27,7 @@ class KeywordRuleEditorView < BufferEditorColumnView
   end
 
   def min_size
-    SF.vector2f(40 * 6, 0)
+    SF.vector2f(25 * 6, 0)
   end
 
   def size
@@ -130,7 +130,7 @@ module KeywordRuleEditorHandler
     refresh
   end
 
-  # Handles the given *event*.
+  # Handles the given *event* regardless of focus.
   def handle!(editor : KeywordRuleEditorState, selected, event)
     handle!(selected, event)
   end
