@@ -301,6 +301,12 @@ class Array
 end
 
 class String
+  # Truncates this string with ellipsis `…` if it has more
+  # than *max* characters.
+  def trunc(max : Int)
+    size > max ? "#{self[0, max - 1]}…" : self
+  end
+
   # Same as `each_byte` but starts iterating from *offset*-th byte.
   def each_byte(*, from offset : Int)
     unsafe_byte_slice(offset, count: bytesize - offset).each do |byte|

@@ -18,7 +18,7 @@ class RuleCodeRowView < BufferEditorRowView
   # Specifies the horizontal padding (content inset) for left,
   # right sides of this view.
   def px
-    SF.vector2f(8, 8)
+    SF.vector2f(6, 8)
   end
 
   # Specifies the vertical padding (content inset) for top,
@@ -27,11 +27,21 @@ class RuleCodeRowView < BufferEditorRowView
     SF.vector2f(4, 6)
   end
 
+  # Returns padding X, Y vector in the top-left corner.
+  def padding_tl
+    SF.vector2f(px.x, py.x)
+  end
+
+  # Returns padding X, Y vector in the bottom-right corner.
+  def padding_br
+    SF.vector2f(px.y, py.y)
+  end
+
   def origin
-    position + SF.vector2f(px.x, py.x)
+    position + padding_tl
   end
 
   def size
-    super + SF.vector2f(px.x + px.y, py.x + py.y)
+    super + padding_tl + padding_br
   end
 end

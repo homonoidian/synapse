@@ -12,6 +12,11 @@ module IController
   # Returns whether this controller is focused.
   getter? focused = false
 
+  # Returns whether *point* is in the bounds of this controller's view.
+  def includes?(point : SF::Vector2)
+    false
+  end
+
   # Returns whether this controller can accept focus.
   def can_focus?
     true
@@ -73,6 +78,10 @@ module MonoBufferController(State, View)
     @focused = @view.active?
 
     refresh
+  end
+
+  def includes?(point : SF::Vector2)
+    @view.includes?(point)
   end
 
   def refresh

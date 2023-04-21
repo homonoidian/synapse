@@ -47,7 +47,7 @@ class KeywordRuleEditorView < BufferEditorColumnView
     bgrect.size = size
     bgrect.fill_color = SF::Color.new(0x31, 0x31, 0x31)
     bgrect.outline_color = active? ? SF::Color.new(0x43, 0x51, 0x80) : SF::Color.new(0x39, 0x39, 0x39)
-    bgrect.outline_thickness = 1
+    bgrect.outline_thickness = 2
 
     bgrect.draw(target, states)
 
@@ -143,6 +143,10 @@ module KeywordRuleEditorHandler
   end
 end
 
+# Keyword rule editor allows to create and edit a keyword rule.
+#
+# Keyword rules are rules whose expression depends on whether an
+# incoming message's keyword matches the keyword of the rule.
 class KeywordRuleEditor
   include MonoBufferController(KeywordRuleEditorState, KeywordRuleEditorView)
 

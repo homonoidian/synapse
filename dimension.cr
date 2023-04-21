@@ -359,6 +359,14 @@ abstract class DimensionView(View, Instant, SubInstant)
   # views, *l* and *r*.
   abstract def arrange_cons_pair(left : View, right : View)
 
+  # Returns whether *point* is in the bounds of this view.
+  def includes?(point : SF::Vector2)
+    size = self.size
+
+    position.x <= point.x <= position.x + size.x &&
+      position.y <= point.y <= position.y + size.y
+  end
+
   # Specifies the position of the first view in this dimension.
   def origin
     position

@@ -17,6 +17,7 @@ require "./rule_header"
 require "./rule_code_row"
 require "./keyword_rule_header"
 require "./keyword_rule_editor"
+require "./birth_rule_editor"
 
 FONT        = SF::Font.from_memory({{read_file("./fonts/code/scientifica.otb")}}.to_slice)
 FONT_BOLD   = SF::Font.from_memory({{read_file("./fonts/code/scientificaBold.otb")}}.to_slice)
@@ -45,10 +46,12 @@ FONT_UI_BOLD   = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Bold.ttf")}
 #
 # ------- Alternatively:
 #
-# [ ] BirthRuleEditor
+# [x] BirthRuleEditor
 # [ ] HeartbeatRuleEditor
+# [ ] extract RuleEditor
 # [ ] ProtocolEditor
 # [ ] Assign each new RuleEditor a custom color
+# [ ] Use variation of this color for e.g. active outline
 # [ ] Have a little circle on top left of RuleEditors with this color
 #
 # "Rule world" is a world of itself (like Tank). You can drag rules
@@ -97,6 +100,10 @@ FONT_UI_BOLD   = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Bold.ttf")}
 #                                          +-------------+
 #
 #
+# [ ] When clicking on a cell in app, instead of showing code
+#     editor show a zoomed out "window" into this rule world.
+#     On click, expand it and redirect events there.
+#
 # -------
 #
 # [ ] Implement HeartbeatRule, BirthRuleEditor. ??? how to create them?
@@ -119,33 +126,46 @@ FONT_UI_BOLD   = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Bold.ttf")}
 # [ ] Replace the current Protocol/Rule/ProtocolEditor system
 #     with this new one.
 
-it_state = KeywordRuleEditorState.new
-it_view = KeywordRuleEditorView.new
-it_view.active = true
-it_view.position = SF.vector2f(100, 200)
+ked_state = KeywordRuleEditorState.new
+ked_view = KeywordRuleEditorView.new
+ked_view.active = true
+ked_view.position = SF.vector2f(100, 200)
+ked = KeywordRuleEditor.new(ked_state, ked_view)
 
-it = KeywordRuleEditor.new(it_state, it_view)
+bed_state = BirthRuleEditorState.new
+bed_view = BirthRuleEditorView.new
+bed_view.active = false
+bed_view.position = SF.vector2f(100, 400)
+bed = BirthRuleEditor.new(bed_state, bed_view)
 
 window = SF::RenderWindow.new(SF::VideoMode.new(800, 600), title: "App")
 window.framerate_limit = 60
 
-###
-
-state1 = BufferEditorRowState.new
-state1.append
-view1 = BufferEditorRowView.new
-view1.position = SF.vector2f(0, 50)
-view1.active = true
-row1 = BufferEditorRow.new(state1, view1)
+focus = ked
 
 while window.open?
   while event = window.poll_event
     case event
     when SF::Event::Closed then window.close
+    when SF::Event::MouseButtonPressed
+      if ked.includes?(SF.vector2f(event.x, event.y))
+        if !focus.same?(ked) && (focus.can_blur? && ked.can_focus?)
+          focus.blur
+          ked.focus
+          focus = ked
+        end
+      elsif bed.includes?(SF.vector2f(event.x, event.y))
+        if !focus.same?(bed) && (focus.can_blur? && bed.can_focus?)
+          focus.blur
+          bed.focus
+          focus = bed
+        end
+      end
     end
-    it.handle(event)
+    focus.handle(event)
   end
   window.clear(SF::Color.new(0x21, 0x21, 0x21))
-  window.draw(it)
+  window.draw(ked)
+  window.draw(bed)
   window.display
 end
