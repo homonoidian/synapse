@@ -268,25 +268,51 @@ class Protocol
     @birth = BirthRule.new(Excerpt.new("", 0))
   end
 
-  def each_birth_rule
+  private def each_birth_rule
     if birth = @birth
       yield birth
     end
   end
 
-  def each_keyword_rule
+  def each_keyword_rule # FIXME: make this private, currently ProtocolEditor needs this
     @rules.each_value do |kwrule|
       yield kwrule
     end
   end
 
-  def each_heartbeat_rule
+  private def each_heartbeat_rule
     @rules.each_value do |rule|
       yield rule if rule.is_a?(HeartbeatRule)
     end
   end
 
-  def update(for cell : Cell, newer : KeywordRule)
+  private def fetch?(signature : RuleSignature)
+    @rules[signature]?.try { |rule| yield rule }
+  end
+
+  private def fetch?(signature : KeywordRuleSignature)
+    @rules[signature]?.try { |rule| yield rule }
+    @rules[WildcardSignature.new(signature.arity)]?.try { |rule| yield rule }
+  end
+
+  def on_memory_changed(cell : Cell)
+    each_heartbeat_rule &.changed
+  end
+
+  def systole(cell : Cell, tank : Tank)
+    each_heartbeat_rule do |hb|
+      result = hb.systole(for: cell)
+      if result.is_a?(ErrResult)
+        cell.fail(result, in: tank)
+      end
+    end
+  end
+
+  def dyastole(cell : Cell, tank : Tank)
+    each_heartbeat_rule &.dyastole(for: cell)
+  end
+
+  def update(for cell : Cell, newer : KeywordRule) # FIXME: callers shoudn't be aware of rules!
     fetch?(newer.signature) do |prev|
       @rules[newer.signature] = prev.update(cell, newer)
       return
@@ -295,20 +321,11 @@ class Protocol
     @rules[newer.signature] = newer
   end
 
-  def update(for cell : Cell, newer : BirthRule)
+  def update(for cell : Cell, newer : BirthRule) # FIXME: callers shoudn't be aware of rules!
     @birth = @birth.update(cell, newer)
   end
 
-  def fetch?(signature : RuleSignature)
-    @rules[signature]?.try { |rule| yield rule }
-  end
-
-  def fetch?(signature : KeywordRuleSignature)
-    @rules[signature]?.try { |rule| yield rule }
-    @rules[WildcardSignature.new(signature.arity)]?.try { |rule| yield rule }
-  end
-
-  def rewrite(signatures : Set(RuleSignature))
+  def rewrite(signatures : Set(RuleSignature)) # FIXME: callers shoudn't be aware of rule signatures!
     new_rules = {} of RuleSignature => KeywordRule
 
     # Get rid of those decls that are not in the signatures set.

@@ -1180,25 +1180,20 @@ class Cell < RoundEntity
   def on_memory_changed
     # The success of heartbeat rules also depends on the memory.
     # If memory changed, try to rerun heartbeat rules.
-    @protocol.each_heartbeat_rule &.changed
+    @protocol.on_memory_changed(self)
   end
 
   # Prefer using `Tank` to calling this method yourself because
   # sync of systoles/dyastoles between relatives is unsupported.
   def systole(in tank : Tank)
-    @protocol.each_heartbeat_rule do |hb|
-      result = hb.systole(for: self)
-      if result.is_a?(ErrResult)
-        fail(result, in: tank)
-      end
-    end
+    @protocol.systole(self, tank)
   rescue CommitSuicide
     suicide(in: tank)
   end
 
   # :ditto:
   def dyastole(in tank : Tank)
-    @protocol.each_heartbeat_rule &.dyastole(for: self)
+    @protocol.dyastole(self, tank)
   rescue CommitSuicide
     suicide(in: tank)
   end
@@ -2642,6 +2637,11 @@ end
 #     represented by two circles "regions" at both ends connected by a 1px line
 # [ ] add "sink" messages which store the last received message
 #     and answer after N millis
+# [ ] make entity#drawable and entity#drawing stuff a module rather
+#     than what comes when subclassing eg entity or physical entity.
+#     this puts a huge restriction on what and how we can draw
+# [ ] represent vesicles using one SF::Points vertex (at least try
+#     and see if it improves performance)
 # [ ] -refactor- WIPE OUT event+mode system. use something simple eg event
 #     streams; have better focus (mouse follows focus but some things e.g.
 #     editor can seize it)
