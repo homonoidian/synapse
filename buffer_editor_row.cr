@@ -165,6 +165,25 @@ module BufferEditorRowHandler
   end
 
   # :ditto:
+  def handle!(row : BufferEditorRowState, event : SF::Event::TextEntered)
+    unless row.empty?
+      handle!(row.selected, event)
+      return
+    end
+
+    chr = event.unicode.chr
+
+    return unless chr.printable?
+
+    # Row is empty (see the guard clause). Append an empty
+    # row and insert whatever has been entered.
+    editor = row.append
+    editor.insert(chr)
+
+    refresh
+  end
+
+  # :ditto:
   def handle!(row : BufferEditorRowState, event : SF::Event)
     return if row.empty?
 
