@@ -8,8 +8,8 @@ end
 # The base appearance of rule headers. See subclasses for more
 # specific descriptions.
 abstract class RuleHeaderView < InputFieldRowView
-  # Holds the padding, which stands for how inset the subviews
-  # are in the bounds of this view.
+  # Specifies the padding, which stands for how inset the
+  # subviews are in the bounds of this view.
   def padding
     SF.vector2f(6, 2)
   end

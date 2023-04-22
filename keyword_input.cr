@@ -17,14 +17,14 @@ class KeywordInputView < InputFieldView
   end
 
   def underline_color
-    SF::Color.new(0xcf, 0x89, 0x9f)
+    SF::Color.new(0xbb, 0x88, 0xdc)
   end
 
   def beam_color
-    SF::Color.new(0xfa, 0xb1, 0xc7)
+    SF::Color.new(0xf1, 0xd9, 0xff)
   end
 
   def text_color
-    SF::Color.new(0xcf, 0x89, 0x9f)
+    SF::Color.new(0xbb, 0x88, 0xdc)
   end
 end
