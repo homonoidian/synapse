@@ -378,7 +378,7 @@ class BufferEditorView
     nxt = find_character_pos(instant.cursor + 1)
 
     @beam.position = cur + beam_margin
-    @beam.size = SF.vector2f(Math.max(5, nxt.x - cur.x), font_size)
+    @beam.size = beam_size(cur, nxt)
   end
 
   # Synchronizes the contents of this view according to *state*.
@@ -404,6 +404,13 @@ class BufferEditorView
   # Returns the line height used in this view.
   def line_height
     font_size * line_spacing
+  end
+
+  # Computes the size (width, height) of the beam given the
+  # positions of the character under the cursor, *cur*, and
+  # the character after the cursor, *nxt*.
+  def beam_size(cur : SF::Vector2, nxt : SF::Vector2)
+    SF.vector2f(Math.max(5, nxt.x - cur.x), font_size)
   end
 
   # Returns the color used for the text contents of this view.
