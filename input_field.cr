@@ -110,10 +110,3 @@ class InputFieldView < BufferEditorView
     underline.draw(target, states)
   end
 end
-
-class InputField < BufferEditor
-  def initialize(state : InputFieldState, view : InputFieldView)
-    super
-    view.active = false
-  end
-end
