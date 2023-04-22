@@ -13,7 +13,7 @@ end
 abstract class DimensionState(State)
   def initialize
     @states = [] of State
-    @selected = 0
+    @selected = first_index
 
     min_size.times { append }
   end
@@ -32,10 +32,11 @@ abstract class DimensionState(State)
 
   # Returns whether there are currently no states in this dimension.
   def empty?
-    size.zero?
+    first_index == size
   end
 
-  # Returns the amount of states in this dimension.
+  # Returns the *total* amount of states in this dimension, *including*
+  # those before and after `first_index` and `last_index`.
   def size
     @states.size
   end
@@ -343,6 +344,12 @@ abstract class DimensionView(View, Instant, SubInstant)
 
   def initialize
     @views = [] of View
+    @selected = 0
+  end
+
+  # Returns the subordinate `View` that is currently selected.
+  def selected
+    @views[@selected]
   end
 
   # Calculates and returns the full size of this dimension view.
@@ -376,9 +383,9 @@ abstract class DimensionView(View, Instant, SubInstant)
   # to the given *instant*.
   #
   # Positions the new subordinate view at `origin`.
-  def new_subview_from(index : Int, instant : SubInstant, selected : Int)
+  def new_subview_from(index : Int, instant : SubInstant)
     subview = new_subview_for(index)
-    subview.active = active? && index == selected
+    subview.active = active? && index == @selected
     subview.position = origin
     subview.update(instant)
     subview
@@ -391,7 +398,9 @@ abstract class DimensionView(View, Instant, SubInstant)
     states = instant.states
     return if states.empty?
 
-    views = states.map_with_index { |state, index| new_subview_from(index, state, instant.selected) }
+    @selected = instant.selected
+
+    views = states.map_with_index { |state, index| new_subview_from(index, state) }
     views.each_cons_pair { |l, r| arrange_cons_pair(l, r) }
 
     # To do arrange() subviews must be updated(). However, after

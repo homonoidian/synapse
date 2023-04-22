@@ -2,13 +2,7 @@
 # contains newlines -- effectively making the buffer single-line.
 class InputFieldState < BufferEditorState
   def insertable?(printable : String)
-    printable.each_byte do |byte|
-      if byte === '\n' || byte === '\r'
-        return false
-      end
-    end
-
-    true
+    !printable.matches?(/\s/)
   end
 end
 

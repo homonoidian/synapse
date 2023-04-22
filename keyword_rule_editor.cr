@@ -38,6 +38,35 @@ class KeywordRuleEditorView < BufferEditorColumnView
     {KeywordRuleHeaderView, RuleCodeRowView}[index].new
   end
 
+  # Specifies the background color for the header `RuleHeaderView`.
+  def header_color
+    SF::Color.new(0x3f, 0x3f, 0x3f)
+  end
+
+  # Specifies the background color of this editor as a whole.
+  def background_color
+    SF::Color.new(0x31, 0x31, 0x31)
+  end
+
+  # Specifies the color of the outline of this editor.
+  def outline_color
+    active? ? SF::Color.new(0x43, 0x51, 0x80) : SF::Color.new(0x3f, 0x3f, 0x3f)
+  end
+
+  # Invoked after editor background and header background are
+  # drawn, but before editor content is drawn.
+  def decorate(target, states)
+    return unless active?
+
+    base_color = SF::Color.new(0x36, 0x8d, 0x68)
+
+    activity_sign = SF::RectangleShape.new
+    activity_sign.size = SF.vector2f(5, 5)
+    activity_sign.position = selected.position + SF.vector2f(-10, 7.5)
+    activity_sign.fill_color = base_color
+    activity_sign.draw(target, states)
+  end
+
   def draw(target, states)
     #
     # Draw background rectangle.
@@ -45,8 +74,8 @@ class KeywordRuleEditorView < BufferEditorColumnView
     bgrect = SF::RectangleShape.new
     bgrect.position = position
     bgrect.size = size
-    bgrect.fill_color = SF::Color.new(0x31, 0x31, 0x31)
-    bgrect.outline_color = active? ? SF::Color.new(0x43, 0x51, 0x80) : SF::Color.new(0x39, 0x39, 0x39)
+    bgrect.fill_color = background_color
+    bgrect.outline_color = outline_color
     bgrect.outline_thickness = 2
 
     bgrect.draw(target, states)
@@ -59,9 +88,11 @@ class KeywordRuleEditorView < BufferEditorColumnView
       headbg = SF::RectangleShape.new
       headbg.position = SF.vector2f(position.x, position.y)
       headbg.size = SF.vector2f(size.x, @views[0].size.y)
-      headbg.fill_color = SF::Color.new(0x39, 0x39, 0x39)
+      headbg.fill_color = header_color
       headbg.draw(target, states)
     end
+
+    decorate(target, states)
 
     super
   end
@@ -139,7 +170,13 @@ module KeywordRuleEditorHandler
   def handle!(editor : KeywordRuleEditorState, event : SF::Event)
     return if editor.empty?
 
-    handle!(editor, editor.selected, event)
+    selected = editor.selected
+
+    begin
+      handle!(editor, selected, event)
+    rescue DimensionOverflowException | DimensionUnderflowException
+      handle!(selected, event)
+    end
   end
 end
 

@@ -18,6 +18,10 @@ require "./rule_code_row"
 require "./keyword_rule_header"
 require "./keyword_rule_editor"
 require "./birth_rule_editor"
+require "./period_input"
+require "./heartbeat_input"
+require "./heartbeat_rule_header"
+require "./heartbeat_rule_editor"
 
 FONT        = SF::Font.from_memory({{read_file("./fonts/code/scientifica.otb")}}.to_slice)
 FONT_BOLD   = SF::Font.from_memory({{read_file("./fonts/code/scientificaBold.otb")}}.to_slice)
@@ -47,7 +51,7 @@ FONT_UI_BOLD   = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Bold.ttf")}
 # ------- Alternatively:
 #
 # [x] BirthRuleEditor
-# [ ] HeartbeatRuleEditor
+# [x] HeartbeatRuleEditor
 # [ ] extract RuleEditor
 # [ ] ProtocolEditor
 # [ ] Assign each new RuleEditor a custom color
@@ -135,8 +139,14 @@ ked = KeywordRuleEditor.new(ked_state, ked_view)
 bed_state = BirthRuleEditorState.new
 bed_view = BirthRuleEditorView.new
 bed_view.active = false
-bed_view.position = SF.vector2f(100, 400)
+bed_view.position = SF.vector2f(100, 300)
 bed = BirthRuleEditor.new(bed_state, bed_view)
+
+hed_state = HeartbeatRuleEditorState.new
+hed_view = HeartbeatRuleEditorView.new
+hed_view.active = false
+hed_view.position = SF.vector2f(100, 400)
+hed = HeartbeatRuleEditor.new(hed_state, hed_view)
 
 window = SF::RenderWindow.new(SF::VideoMode.new(800, 600), title: "App")
 window.framerate_limit = 60
@@ -148,17 +158,24 @@ while window.open?
     case event
     when SF::Event::Closed then window.close
     when SF::Event::MouseButtonPressed
-      if ked.includes?(SF.vector2f(event.x, event.y))
+      case SF.vector2f(event.x, event.y)
+      when .in?(ked)
         if !focus.same?(ked) && (focus.can_blur? && ked.can_focus?)
           focus.blur
           ked.focus
           focus = ked
         end
-      elsif bed.includes?(SF.vector2f(event.x, event.y))
+      when .in?(bed)
         if !focus.same?(bed) && (focus.can_blur? && bed.can_focus?)
           focus.blur
           bed.focus
           focus = bed
+        end
+      when .in?(hed)
+        if !focus.same?(hed) && (focus.can_blur? && hed.can_focus?)
+          focus.blur
+          hed.focus
+          focus = hed
         end
       end
     end
@@ -167,5 +184,6 @@ while window.open?
   window.clear(SF::Color.new(0x21, 0x21, 0x21))
   window.draw(ked)
   window.draw(bed)
+  window.draw(hed)
   window.display
 end
