@@ -5,10 +5,21 @@
 #
 # Also allows clients to peek into `BufferEditorRowState` at
 # discrete time steps for change-awareness.
-record BufferEditorRowInstant,
-  timestamp : Int64,
-  states : Array(BufferEditorInstant),
-  selected : Int32
+class BufferEditorRowInstant
+  # Returns the timestamp when this instant was captured.
+  getter timestamp : Int64
+
+  # Holds the subordinate editor instants when this instant
+  # was captured.
+  getter states : Array(BufferEditorInstant)
+
+  # Returns which editor was selected when this instant
+  # was captured.
+  getter selected : Int32
+
+  def initialize(@timestamp, @states, @selected)
+  end
+end
 
 # Controls a row of `BufferEditorState`s with one currently
 # `selected` state.

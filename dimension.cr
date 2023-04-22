@@ -334,9 +334,8 @@ end
 # * `SubInstant` is the instant type of the subordinate state
 #    of `DimensionState`.
 abstract class DimensionView(View, Instant, SubInstant)
-  include SF::Drawable
+  include IView
 
-  # Returns the position of this dimension view.
   property position = SF.vector2f(0, 0)
 
   # Returns whether this dimension view is active.
@@ -366,14 +365,6 @@ abstract class DimensionView(View, Instant, SubInstant)
   # views, *l* and *r*.
   abstract def arrange_cons_pair(left : View, right : View)
 
-  # Returns whether *point* is in the bounds of this view.
-  def includes?(point : SF::Vector2)
-    size = self.size
-
-    position.x <= point.x <= position.x + size.x &&
-      position.y <= point.y <= position.y + size.y
-  end
-
   # Specifies the position of the first view in this dimension.
   def origin
     position
@@ -400,7 +391,11 @@ abstract class DimensionView(View, Instant, SubInstant)
 
     @selected = instant.selected
 
-    views = states.map_with_index { |state, index| new_subview_from(index, state) }
+    views = [] of View
+    states.each_with_index do |state, index|
+      views << new_subview_from(index, state)
+    end
+
     views.each_cons_pair { |l, r| arrange_cons_pair(l, r) }
 
     # To do arrange() subviews must be updated(). However, after

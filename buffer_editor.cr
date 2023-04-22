@@ -358,7 +358,7 @@ end
 
 # An `SF::Drawable` view of `BufferEditorState`.
 class BufferEditorView
-  include SF::Drawable
+  include IView
 
   # Determines whether this view is active.
   property? active = true
@@ -428,12 +428,10 @@ class BufferEditorView
     SF.vector2f(0, Math.max(2, @text.character_size * (@text.line_spacing - 1)/2))
   end
 
-  # Returns the position of this view.
   def position
     @text.position.to_i
   end
 
-  # Translates this view to *position*.
   def position=(position : SF::Vector2)
     delta = position - self.position
 

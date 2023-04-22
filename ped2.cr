@@ -5,6 +5,7 @@ require "./ext"
 require "./line"
 require "./buffer"
 require "./controller"
+require "./view"
 require "./dimension"
 require "./buffer_editor"
 require "./buffer_editor_row"
@@ -23,6 +24,8 @@ require "./period_input"
 require "./heartbeat_input"
 require "./heartbeat_rule_header"
 require "./heartbeat_rule_editor"
+require "./protocol_name_editor"
+require "./protocol_editor"
 
 FONT        = SF::Font.from_memory({{read_file("./fonts/code/scientifica.otb")}}.to_slice)
 FONT_BOLD   = SF::Font.from_memory({{read_file("./fonts/code/scientificaBold.otb")}}.to_slice)
@@ -54,8 +57,8 @@ FONT_UI_BOLD   = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Bold.ttf")}
 # [x] BirthRuleEditor
 # [x] HeartbeatRuleEditor
 # [x] extract RuleEditor
-# [ ] ProtocolEditor
-# [ ] Assign each new RuleEditor a custom color
+# [x] ProtocolEditor
+# [ ] Assign each new RuleEditor view a custom color
 # [ ] Use variation of this color for e.g. active outline
 # [ ] Have a little circle on top left of RuleEditors with this color
 #
@@ -149,6 +152,11 @@ hed_view.active = false
 hed_view.position = SF.vector2f(100, 400)
 hed = HeartbeatRuleEditor.new(hed_state, hed_view)
 
+ped_state = ProtocolEditorState.new
+ped_view = ProtocolEditorView.new
+ped_view.position = SF.vector2f(10, 10)
+ped = ProtocolEditor.new(ped_state, ped_view)
+
 window = SF::RenderWindow.new(SF::VideoMode.new(800, 600), title: "App")
 window.framerate_limit = 60
 
@@ -178,6 +186,12 @@ while window.open?
           hed.focus
           focus = hed
         end
+      when .in?(ped)
+        if !focus.same?(ped) && (focus.can_blur? && ped.can_focus?)
+          focus.blur
+          ped.focus
+          focus = ped
+        end
       end
     end
     focus.handle(event)
@@ -186,5 +200,6 @@ while window.open?
   window.draw(ked)
   window.draw(bed)
   window.draw(hed)
+  window.draw(ped)
   window.display
 end

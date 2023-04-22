@@ -2,7 +2,7 @@
 # contains newlines -- effectively making the buffer single-line.
 class InputFieldState < BufferEditorState
   def insertable?(printable : String)
-    !printable.matches?(/\s/)
+    !printable.matches?(/[\r\n]/)
   end
 end
 
@@ -18,7 +18,6 @@ class InputFieldView < BufferEditorView
   # Holds the minimum width of this input field, in pixels.
   property min_width = 5
 
-  # Holds the position of this input field view.
   property position = SF.vector2f(0, 0)
 
   # Returns the default input field width, in pixels.
@@ -50,7 +49,7 @@ class InputFieldView < BufferEditorView
 
   # Returns the size of this field.
   def size
-    SF.vector2i(@max_width || Math.max(@text.width, @min_width), line_height + 4)
+    SF.vector2i(@max_width || Math.max(@text.width, @min_width), (line_height + 4).to_i)
   end
 
   def draw(target, states)
