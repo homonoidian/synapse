@@ -49,6 +49,16 @@ class BufferEditorRowState < DimensionState(BufferEditorState)
     selected.update! { |it| it + string }
   end
 
+  # Returns the index where `column` counting should start.
+  def column_start_index
+    first_index
+  end
+
+  # Returns the index where `column` counting should end.
+  def column_end_index
+    last_index
+  end
+
   # Returns cursor column number *as if this row was a single
   # buffer editor* arranged in a virtual "line".
   #
@@ -57,7 +67,7 @@ class BufferEditorRowState < DimensionState(BufferEditorState)
     return 0 if empty?
 
     cursor = selected.capture.cursor
-    cursor += (first_index...@selected).sum { |n| nth(n).size + 1 }
+    cursor += (column_start_index...@selected).sum { |n| nth(n).size + 1 }
     cursor
   end
 
@@ -70,7 +80,7 @@ class BufferEditorRowState < DimensionState(BufferEditorState)
   def to_column(column : Int)
     return if empty?
 
-    (0...@states.size).accumulate(0) do |offset, index|
+    (column_start_index..column_end_index).accumulate(0) do |offset, index|
       state = @states[index]
 
       if column.in?(offset..offset + state.size)
