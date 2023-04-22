@@ -1,6 +1,6 @@
 # State for a birth rule editor, which consists of a single
 # code buffer editor.
-class BirthRuleEditorState < BufferEditorColumnState
+class BirthRuleEditorState < RuleEditorState
   def min_size
     1 # Code buffer
   end
@@ -15,11 +15,7 @@ class BirthRuleEditorState < BufferEditorColumnState
 end
 
 # View for a birth rule editor.
-class BirthRuleEditorView < BufferEditorColumnView
-  def wsheight
-    0
-  end
-
+class BirthRuleEditorView < RuleEditorView
   # Returns the caption displayed above the rule.
   def caption
     "✮ born"
@@ -55,23 +51,9 @@ class BirthRuleEditorView < BufferEditorColumnView
     SF.vector2f(12, 11)
   end
 
-  def min_size
-    SF.vector2f(25 * 6, 0)
-  end
-
   def size
     size = super + SF.vector2f(0, caption_space_y) + padding*2
     size.max(min_size)
-  end
-
-  # Specifies the background color of this editor as a whole.
-  def background_color
-    SF::Color.new(0x31, 0x31, 0x31)
-  end
-
-  # Specifies the color of the outline of this editor.
-  def outline_color
-    active? ? SF::Color.new(0x43, 0x51, 0x80) : SF::Color.new(0x3f, 0x3f, 0x3f)
   end
 
   def draw(target, states)

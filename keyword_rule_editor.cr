@@ -1,7 +1,7 @@
 # State for a keyword rule editor, which consists of a keyword
 # rule header (keyword and parameters for the rule), followed
 # by a code row which holds a single code buffer editor.
-class KeywordRuleEditorState < BufferEditorColumnState
+class KeywordRuleEditorState < RuleEditorState
   def min_size
     1 # Rule header
   end
@@ -17,17 +17,9 @@ end
 
 # View for a keyword rule editor. Has some background and outline.
 # The color of the latter depends on whether the view is active.
-class KeywordRuleEditorView < BufferEditorColumnView
-  def wsheight
-    0
-  end
-
+class KeywordRuleEditorView < RuleEditorView
   def snapstep
     SF.vector2f(6, @views.size > 1 ? 11 : 0)
-  end
-
-  def min_size
-    SF.vector2f(25 * 6, 0)
   end
 
   def size
@@ -41,16 +33,6 @@ class KeywordRuleEditorView < BufferEditorColumnView
   # Specifies the background color for the header `RuleHeaderView`.
   def header_color
     SF::Color.new(0x3f, 0x3f, 0x3f)
-  end
-
-  # Specifies the background color of this editor as a whole.
-  def background_color
-    SF::Color.new(0x31, 0x31, 0x31)
-  end
-
-  # Specifies the color of the outline of this editor.
-  def outline_color
-    active? ? SF::Color.new(0x43, 0x51, 0x80) : SF::Color.new(0x3f, 0x3f, 0x3f)
   end
 
   # Invoked after editor background and header background are

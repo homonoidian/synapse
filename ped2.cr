@@ -15,6 +15,7 @@ require "./keyword_input"
 require "./param_input"
 require "./rule_header"
 require "./rule_code_row"
+require "./rule_editor"
 require "./keyword_rule_header"
 require "./keyword_rule_editor"
 require "./birth_rule_editor"
@@ -52,7 +53,7 @@ FONT_UI_BOLD   = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Bold.ttf")}
 #
 # [x] BirthRuleEditor
 # [x] HeartbeatRuleEditor
-# [ ] extract RuleEditor
+# [x] extract RuleEditor
 # [ ] ProtocolEditor
 # [ ] Assign each new RuleEditor a custom color
 # [ ] Use variation of this color for e.g. active outline
