@@ -1,9 +1,9 @@
-# A time-ordered snapshot of `ProtocolEditorInstant`.
+# A time-ordered snapshot of `ProtocolEditorState`.
 #
 # Allows clients to implement an undo/redo system independent
-# of `ProtocolEditorInstant`.
+# of `ProtocolEditorState`.
 #
-# Also allows clients to peek into `ProtocolEditorInstant` at
+# Also allows clients to peek into `ProtocolEditorState` at
 # discrete time steps for change-awareness.
 class ProtocolEditorInstant < BufferEditorRowInstant
   # Returns the unique identifier of the protocol at the time
