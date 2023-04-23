@@ -38,7 +38,7 @@ class KeywordRuleEditorView < RuleEditorView
   # Invoked after editor background and header background are
   # drawn, but before editor content is drawn.
   def decorate(target, states)
-    return unless active?
+    return super unless active?
 
     base_color = SF::Color.new(0x36, 0x8d, 0x68)
 
@@ -47,9 +47,13 @@ class KeywordRuleEditorView < RuleEditorView
     activity_sign.position = selected.position + SF.vector2f(-10, 7.5)
     activity_sign.fill_color = base_color
     activity_sign.draw(target, states)
+
+    super
   end
 
-  def draw(target, states)
+  def describe(target, states)
+    super
+
     #
     # Draw background rectangle.
     #
@@ -59,7 +63,6 @@ class KeywordRuleEditorView < RuleEditorView
     bgrect.fill_color = background_color
     bgrect.outline_color = outline_color
     bgrect.outline_thickness = 2
-
     bgrect.draw(target, states)
 
     if @views.size > 1
@@ -73,10 +76,6 @@ class KeywordRuleEditorView < RuleEditorView
       headbg.fill_color = header_color
       headbg.draw(target, states)
     end
-
-    decorate(target, states)
-
-    super
   end
 end
 
@@ -172,4 +171,5 @@ class KeywordRuleEditor
   include BufferEditorHandler
   include BufferEditorRowHandler
   include KeywordRuleEditorHandler
+  include RuleEditorHandler
 end

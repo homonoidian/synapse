@@ -14,7 +14,7 @@ class ProtocolEditorInstant < BufferEditorRowInstant
     super(timestamp, states, selected)
   end
 
-  # Initializes this instant from the parent buffer editro
+  # Initializes this instant from the parent buffer editor
   # row *instant*.
   def initialize(instant : BufferEditorRowInstant, id : UUID)
     initialize(instant.timestamp, instant.states, instant.selected, id)
@@ -147,10 +147,15 @@ class ProtocolEditorView < InputFieldRowView
   end
 end
 
+module ProtocolEditorHandler
+  include Draggable(ProtocolEditorState)
+end
+
 # Protocol editor allows to create and edit protocols, which
 # are, simply speaking, "umbrellas" for rules.
 class ProtocolEditor
   include MonoBufferController(ProtocolEditorState, ProtocolEditorView)
   include BufferEditorHandler
   include BufferEditorRowHandler
+  include ProtocolEditorHandler
 end

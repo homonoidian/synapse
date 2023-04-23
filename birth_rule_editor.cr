@@ -56,7 +56,17 @@ class BirthRuleEditorView < RuleEditorView
     size.max(min_size)
   end
 
-  def draw(target, states)
+  def draw_shadow(target, states)
+    shadow_rect = SF::RectangleShape.new
+    shadow_rect.position = SF.vector2f(position.x, origin.y)
+    shadow_rect.size = size - SF.vector2f(0, caption_space_y + padding.y) + shadow_outset
+    shadow_rect.fill_color = shadow_color
+    shadow_rect.draw(target, states)
+  end
+
+  def describe(target, states)
+    super
+
     #
     # Draw background rectangle.
     #
@@ -85,8 +95,6 @@ class BirthRuleEditorView < RuleEditorView
 
     capbg.draw(target, states)
     cap.draw(target, states)
-
-    super
   end
 end
 
@@ -100,4 +108,5 @@ class BirthRuleEditor
   include BufferEditorHandler
   include BufferEditorRowHandler
   include BufferEditorColumnHandler
+  include RuleEditorHandler
 end

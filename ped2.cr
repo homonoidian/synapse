@@ -6,6 +6,7 @@ require "./line"
 require "./buffer"
 require "./controller"
 require "./view"
+require "./draggable"
 require "./dimension"
 require "./buffer_editor"
 require "./buffer_editor_row"
@@ -136,19 +137,16 @@ FONT_UI_BOLD   = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Bold.ttf")}
 
 ked_state = KeywordRuleEditorState.new
 ked_view = KeywordRuleEditorView.new
-ked_view.active = true
 ked_view.position = SF.vector2f(100, 200)
 ked = KeywordRuleEditor.new(ked_state, ked_view)
 
 bed_state = BirthRuleEditorState.new
 bed_view = BirthRuleEditorView.new
-bed_view.active = false
 bed_view.position = SF.vector2f(100, 300)
 bed = BirthRuleEditor.new(bed_state, bed_view)
 
 hed_state = HeartbeatRuleEditorState.new
 hed_view = HeartbeatRuleEditorView.new
-hed_view.active = false
 hed_view.position = SF.vector2f(100, 400)
 hed = HeartbeatRuleEditor.new(hed_state, hed_view)
 
@@ -160,7 +158,7 @@ ped = ProtocolEditor.new(ped_state, ped_view)
 window = SF::RenderWindow.new(SF::VideoMode.new(800, 600), title: "App")
 window.framerate_limit = 60
 
-focus = ked
+focus = nil
 
 while window.open?
   while event = window.poll_event
@@ -169,32 +167,35 @@ while window.open?
     when SF::Event::MouseButtonPressed
       case SF.vector2f(event.x, event.y)
       when .in?(ked)
-        if !focus.same?(ked) && (focus.can_blur? && ked.can_focus?)
-          focus.blur
+        if !focus.same?(ked) && ((focus.nil? || focus.can_blur?) && ked.can_focus?)
+          focus.try &.blur
           ked.focus
           focus = ked
         end
       when .in?(bed)
-        if !focus.same?(bed) && (focus.can_blur? && bed.can_focus?)
-          focus.blur
+        if !focus.same?(bed) && ((focus.nil? || focus.can_blur?) && bed.can_focus?)
+          focus.try &.blur
           bed.focus
           focus = bed
         end
       when .in?(hed)
-        if !focus.same?(hed) && (focus.can_blur? && hed.can_focus?)
-          focus.blur
+        if !focus.same?(hed) && ((focus.nil? || focus.can_blur?) && hed.can_focus?)
+          focus.try &.blur
           hed.focus
           focus = hed
         end
       when .in?(ped)
-        if !focus.same?(ped) && (focus.can_blur? && ped.can_focus?)
-          focus.blur
+        if !focus.same?(ped) && ((focus.nil? || focus.can_blur?) && ped.can_focus?)
+          focus.try &.blur
           ped.focus
           focus = ped
         end
+      else
+        focus.try &.blur
+        focus = nil
       end
     end
-    focus.handle(event)
+    focus.try &.handle(event)
   end
   window.clear(SF::Color.new(0x21, 0x21, 0x21))
   window.draw(ked)

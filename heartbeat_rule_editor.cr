@@ -24,4 +24,5 @@ class HeartbeatRuleEditor
   include BufferEditorHandler
   include BufferEditorRowHandler
   include KeywordRuleEditorHandler
+  include RuleEditorHandler
 end
