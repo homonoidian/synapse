@@ -5,10 +5,8 @@
 #
 # Also allows clients to peek into `BufferEditorColumnState`
 # at discrete time steps for change-awareness.
-record BufferEditorColumnInstant,
-  timestamp : Int64,
-  states : Array(BufferEditorRowInstant),
-  selected : Int32
+class BufferEditorColumnInstant < DimensionInstant(BufferEditorRowInstant)
+end
 
 # Controls a column of `BufferEditorRow`s with one currently
 # `selected` row.
@@ -17,7 +15,7 @@ class BufferEditorColumnState < DimensionState(BufferEditorRowState)
     BufferEditorRowState.new
   end
 
-  def capture
+  def capture : BufferEditorColumnInstant
     BufferEditorColumnInstant.new(Time.local.to_unix, @states.map &.capture, @selected)
   end
 

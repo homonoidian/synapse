@@ -8,6 +8,29 @@ end
 class DimensionUnderflowException < Exception
 end
 
+# A time-ordered snapshot of `Dimension`.
+#
+# Allows clients to implement an undo/redo system independent
+# of `Dimension`.
+#
+# Also allows clients to peek into `Dimension` at discrete time
+# steps for change-awareness.
+class DimensionInstant(SubInstant)
+  # Returns the timestamp when this instant was captured.
+  getter timestamp : Int64
+
+  # Holds the subordinate editor instants when this instant
+  # was captured.
+  getter states : Array(SubInstant)
+
+  # Returns which editor was selected when this instant
+  # was captured.
+  getter selected : Int32
+
+  def initialize(@timestamp, @states, @selected)
+  end
+end
+
 # Generic control logic for a dimension (e.g. row, column) of
 # `State`s with one currently `selected` `State`.
 abstract class DimensionState(State)
@@ -28,7 +51,7 @@ abstract class DimensionState(State)
   # Captures and returns an instant of this dimension.
   #
   # Useful for undo/redo.
-  abstract def capture
+  abstract def capture : DimensionInstant
 
   # Returns whether there are currently no states in this dimension.
   def empty?
