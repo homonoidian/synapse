@@ -54,6 +54,8 @@ end
 # Displays the protocol name, and unique identifier of the
 # protocol in the caption.
 class ProtocolEditorView < InputFieldRowView
+  include IRemixIconView
+
   @id : UUID?
 
   def new_subview_for(index : Int)
@@ -97,9 +99,17 @@ class ProtocolEditorView < InputFieldRowView
     active? ? SF::Color.new(0x43, 0x51, 0x80) : SF::Color.new(0x3f, 0x3f, 0x3f)
   end
 
+  def icon
+    Icon::Protocol
+  end
+
+  def icon_color
+    caption_color
+  end
+
   # Returns the caption displayed above the rule.
   def caption
-    "☰protocol #{@id || "<no id | bug>"}"
+    "protocol #{@id || "<no id | bug>"}"
   end
 
   # Specifies the maximum amount of characters in the rule
@@ -138,8 +148,12 @@ class ProtocolEditorView < InputFieldRowView
     #
     # Draw caption and icon.
     #
+    icon = icon_text
+    icon.position = dock.position + SF.vector2f(bgrect.outline_thickness, 0)
+    icon.draw(target, states)
+
     cap = SF::Text.new(caption.trunc(caption_max_chars), FONT, 11)
-    cap.position = dock.position + SF.vector2f(bgrect.outline_thickness, 0)
+    cap.position = icon.position + SF.vector2f(icon_span_x, 0)
     cap.fill_color = caption_color
     cap.draw(target, states)
 

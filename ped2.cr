@@ -112,32 +112,21 @@ class LabelView
 end
 
 class MenuItemView < LabelView
-  include IIconView
+  include IRemixIconView
 
-  property icon = "●"
+  # Holds the character used as the icon.
+  property icon = Icon::GenericAdd
 
   def padding
     SF.vector2f(10, 3)
   end
 
   def origin
-    super + SF.vector2f(icon_span_x, 0)
+    super + SF.vector2f(icon_span_x, icon_font_size // 4)
   end
 
   def size
-    super + SF.vector2f(icon_span_x, 0)
-  end
-
-  def icon_span_x
-    12
-  end
-
-  def icon_font
-    FONT
-  end
-
-  def icon_font_size
-    11
+    super + SF.vector2f(icon_span_x, icon_font_size // 4)
   end
 
   def icon_color
@@ -385,10 +374,10 @@ menu_state.append("New protocol")
 menu_state.append("Test item...")
 
 menu_view = MenuView.new
-menu_view.append_icon("✮")
-menu_view.append_icon("…")
-menu_view.append_icon("♥")
-menu_view.append_icon("☰")
+menu_view.append_icon(Icon::BirthRule)
+menu_view.append_icon(Icon::KeywordRule)
+menu_view.append_icon(Icon::HeartbeatRule)
+menu_view.append_icon(Icon::Protocol)
 menu_view.position = SF.vector2f(300, 10)
 menu = Menu.new(menu_state, menu_view)
 

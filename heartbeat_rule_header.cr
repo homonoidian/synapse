@@ -43,7 +43,7 @@ end
 # Displays the dummy heartbeat input and, optionally, the period
 # of the heartbeat.
 class HeartbeatRuleHeaderView < KeywordRuleHeaderView
-  include IIconView
+  include IRemixIconView
 
   def new_subview_for(index : Int)
     index == 0 ? HeartbeatInputView.new : PeriodInputView.new
@@ -58,15 +58,11 @@ class HeartbeatRuleHeaderView < KeywordRuleHeaderView
   end
 
   def icon
-    "♥"
+    Icon::HeartbeatRule
   end
 
   def icon_span_x
-    10
-  end
-
-  def icon_font
-    FONT
+    16
   end
 
   def icon_font_size

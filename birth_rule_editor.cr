@@ -16,9 +16,27 @@ end
 
 # View for a birth rule editor.
 class BirthRuleEditorView < RuleEditorView
+  include IRemixIconView
+
+  def icon
+    Icon::BirthRule
+  end
+
+  def icon_color
+    caption_color
+  end
+
+  def icon_font_size
+    11
+  end
+
+  def icon_span_x
+    16
+  end
+
   # Returns the caption displayed above the rule.
   def caption
-    "✮ born"
+    "Born"
   end
 
   # Specifies the amount of vertical space to allocate for
@@ -71,21 +89,25 @@ class BirthRuleEditorView < RuleEditorView
     bgrect.draw(target, states)
 
     #
-    # Create caption.
+    # Create caption and icon.
     #
+    icon = icon_text
+    icon.position = position + SF.vector2f(padding.x, 0)
+
     cap = SF::Text.new(caption.trunc(caption_max_chars), FONT_BOLD, 11)
-    cap.position = position + SF.vector2f(padding.x, 0)
+    cap.position = icon.position + SF.vector2f(icon_span_x, 0)
     cap.fill_color = caption_color
 
     #
-    # Draw caption background followed by caption.
+    # Draw caption background followed by caption and icon.
     #
     capbg = SF::RectangleShape.new
-    capbg.position = cap.position - SF.vector2f(bgrect.outline_thickness, bgrect.outline_thickness) - SF.vector2f(padding.x, 0)
+    capbg.position = icon.position - SF.vector2f(bgrect.outline_thickness, bgrect.outline_thickness) - SF.vector2f(padding.x, 0)
     capbg.fill_color = bgrect.outline_color
     capbg.size = SF.vector2f(bgrect.size.x, cap.size.y) + SF.vector2f(bgrect.outline_thickness*2, bgrect.outline_thickness*2)
 
     capbg.draw(target, states)
+    icon.draw(target, states)
     cap.draw(target, states)
   end
 end
