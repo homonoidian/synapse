@@ -44,7 +44,7 @@ class RuleEditorView < BufferEditorColumnView
   # distance between the shadow's bottom right corner and
   # bounding rectangle's bottom right corner.
   def shadow_outset
-    SF.vector2f(5, 6)
+    SF.vector2f(9, 7)
   end
 
   # Draws the shadow for this view. By default draws a rectangular
