@@ -43,6 +43,8 @@ end
 # Displays the dummy heartbeat input and, optionally, the period
 # of the heartbeat.
 class HeartbeatRuleHeaderView < KeywordRuleHeaderView
+  include IIconView
+
   def new_subview_for(index : Int)
     index == 0 ? HeartbeatInputView.new : PeriodInputView.new
   end
@@ -55,24 +57,22 @@ class HeartbeatRuleHeaderView < KeywordRuleHeaderView
     super + SF.vector2f(icon_span_x, 0)
   end
 
-  # Specifies the character used as the icon in the header.
-  def icon_char
+  def icon
     "♥"
   end
 
-  # Specifies how many pixels should be allocated to the icon
-  # character at the top left corner.
   def icon_span_x
     10
   end
 
-  # Specifies the font which should be used to render the
-  # icon character.
   def icon_font
     FONT
   end
 
-  # Returns the color which should be used to paint the icon.
+  def icon_font_size
+    11
+  end
+
   def icon_color
     SF::Color.new(0xeb, 0x7a, 0x8e)
   end
@@ -80,9 +80,8 @@ class HeartbeatRuleHeaderView < KeywordRuleHeaderView
   def draw(target, states)
     super
 
-    icon = SF::Text.new(icon_char, icon_font, 11)
+    icon = icon_text
     icon.position = position + padding # ???
-    icon.fill_color = icon_color
     icon.draw(target, states)
   end
 end

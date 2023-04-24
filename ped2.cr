@@ -9,6 +9,7 @@ require "./controller"
 require "./view"
 require "./draggable"
 require "./dimension"
+require "./icon_view"
 require "./buffer_editor"
 require "./buffer_editor_row"
 require "./buffer_editor_column"
@@ -111,9 +112,9 @@ class LabelView
 end
 
 class MenuItemView < LabelView
-  def initialize(@icon : String)
-    super()
-  end
+  include IIconView
+
+  property icon = "●"
 
   def padding
     SF.vector2f(10, 3)
@@ -125,10 +126,6 @@ class MenuItemView < LabelView
 
   def size
     super + SF.vector2f(icon_span_x, 0)
-  end
-
-  def icon_char
-    @icon
   end
 
   def icon_span_x
@@ -158,10 +155,9 @@ class MenuItemView < LabelView
   def draw(target, states)
     super
 
-    text = SF::Text.new(icon_char, icon_font, icon_font_size)
-    text.position = position + padding
-    text.fill_color = text_color
-    text.draw(target, states)
+    icon = icon_text
+    icon.position = position + padding
+    icon.draw(target, states)
   end
 end
 
@@ -196,7 +192,11 @@ class MenuView < DimensionView(LabelView, MenuInstant, LabelInstant)
   end
 
   def new_subview_for(index : Int) : LabelView
-    MenuItemView.new(@icons[index]? || "●")
+    item = MenuItemView.new
+    if icon = @icons[index]?
+      item.icon = icon
+    end
+    item
   end
 
   def wsheight
