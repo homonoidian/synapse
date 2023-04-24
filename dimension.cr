@@ -209,18 +209,34 @@ abstract class DimensionState(State)
     append(last_index + 1)
   end
 
-  # Selects the previous state. Does nothing if the selected
+  # Selects the previous state.
+  #
+  # If *circular* is false, does nothing if the selected state
+  # is the first.
+  #
+  # If *circular* is true, goes to the last state if the selected
   # state is the first.
-  def to_prev
-    return if first_selected?
+  def to_prev(circular = false)
+    if first_selected?
+      to_last if circular
+      return
+    end
 
     to_nth(prev_index)
   end
 
-  # Selects the next state. Does nothing if the selected state
+  # Selects the next state.
+  #
+  # If *circular* is false, does nothing if the selected state
   # is the last.
-  def to_next
-    return if last_selected?
+  #
+  # If *circular* is true, goes to the first state if the selected
+  # state is the last.
+  def to_next(circular = false)
+    if last_selected?
+      to_first if circular
+      return
+    end
 
     to_nth(next_index)
   end
