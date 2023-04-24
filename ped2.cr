@@ -44,7 +44,13 @@ FONT_UI_BOLD   = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Bold.ttf")}
 
 # ----------------------------------------------------------
 
-record LabelInstant, timestamp : Int64, caption : String
+class LabelInstant
+  getter timestamp : Int64
+  getter caption : String
+
+  def initialize(@timestamp, @caption)
+  end
+end
 
 class LabelState
   property caption = ""
@@ -111,6 +117,18 @@ class LabelView
   end
 end
 
+class MenuItemInstant < LabelInstant
+  def initialize(instant : LabelInstant)
+    initialize(instant.timestamp, instant.caption)
+  end
+end
+
+class MenuItemState < LabelState
+  def capture
+    MenuItemInstant.new(super)
+  end
+end
+
 class MenuItemView < LabelView
   include IRemixIconView
 
@@ -137,10 +155,6 @@ class MenuItemView < LabelView
     active? ? SF::Color.new(0xbb, 0xd3, 0xff) : SF::Color.new(0xCC, 0xCC, 0xCC)
   end
 
-  def background_color
-    active? ? SF::Color.new(0x15, 0x59, 0x99) : SF::Color::Transparent
-  end
-
   def draw(target, states)
     super
 
@@ -150,10 +164,10 @@ class MenuItemView < LabelView
   end
 end
 
-class MenuInstant < DimensionInstant(LabelInstant)
+class MenuInstant < DimensionInstant(MenuItemInstant)
 end
 
-class MenuState < DimensionState(LabelState)
+class MenuState < DimensionState(MenuItemState)
   def append(caption : String)
     item = append
     item.caption = caption
@@ -164,12 +178,12 @@ class MenuState < DimensionState(LabelState)
     MenuInstant.new(Time.local.to_unix, @states.map(&.capture), @selected)
   end
 
-  def new_substate_for(index : Int) : LabelState
-    LabelState.new
+  def new_substate_for(index : Int) : MenuItemState
+    MenuItemState.new
   end
 end
 
-class MenuView < DimensionView(LabelView, MenuInstant, LabelInstant)
+class MenuView < DimensionView(MenuItemView, MenuInstant, MenuItemInstant)
   def initialize
     super
 
@@ -180,7 +194,13 @@ class MenuView < DimensionView(LabelView, MenuInstant, LabelInstant)
     @icons << icon
   end
 
-  def new_subview_for(index : Int) : LabelView
+  def ord_at(point : SF::Vector2)
+    @views.each_with_index do |view, index|
+      return index if view.includes?(point)
+    end
+  end
+
+  def new_subview_for(index : Int) : MenuItemView
     item = MenuItemView.new
     if icon = @icons[index]?
       item.icon = icon
@@ -192,7 +212,7 @@ class MenuView < DimensionView(LabelView, MenuInstant, LabelInstant)
     0
   end
 
-  def arrange_cons_pair(left : LabelView, right : LabelView)
+  def arrange_cons_pair(left : MenuItemView, right : MenuItemView)
     right.position = SF.vector2f(
       left.position.x,
       left.position.y + left.size.y + wsheight
@@ -212,6 +232,42 @@ class MenuView < DimensionView(LabelView, MenuInstant, LabelInstant)
       @views.sum(&.size.y) + wsheight * (@views.size - 1)
     ).snap(snapstep)
   end
+
+  # Specifies the background color of this editor as a whole.
+  def background_color
+    SF::Color.new(0x31, 0x31, 0x31)
+  end
+
+  # Specifies the color of the outline of this editor.
+  def outline_color
+    active? ? SF::Color.new(0x43, 0x51, 0x80) : SF::Color.new(0x3f, 0x3f, 0x3f)
+  end
+
+  def active_item_background
+    SF::Color.new(0x33, 0x42, 0x70)
+  end
+
+  def draw(target, states)
+    bg_rect = SF::RectangleShape.new
+    bg_rect.position = position
+    bg_rect.size = size
+    bg_rect.fill_color = background_color
+    bg_rect.outline_thickness = 2
+    bg_rect.outline_color = outline_color
+    bg_rect.draw(target, states)
+
+    @views.each do |item|
+      if item.active?
+        item_bg_rect = SF::RectangleShape.new
+        item_bg_rect.position = item.position
+        item_bg_rect.size = SF.vector2f(size.x, item.size.y)
+        item_bg_rect.fill_color = active_item_background
+        item_bg_rect.draw(target, states)
+      end
+
+      item.draw(target, states)
+    end
+  end
 end
 
 class Menu
@@ -223,17 +279,67 @@ class Menu
     refresh
   end
 
+  def append(item : String, icon : String?)
+    @state.append(item)
+    @view.append_icon(icon)
+    refresh
+  end
+
+  def on_accepted(item : MenuItemState)
+    puts "Clicked: #{item.capture.inspect}"
+  end
+
   def includes?(point : SF::Vector2)
     @view.includes?(point)
   end
 
   def handle!(event : SF::Event::MouseMoved)
-    puts event
-    # TODO: find item at event.x, event.y
-    # TODO: get item ord
-    # TODO: select item in view by ord
-    # TODO: selected item in state by ord
-    # item.active = true
+    if ord = @view.ord_at(SF.vector2f(event.x, event.y))
+      @view.active = true
+      @state.to_nth(ord)
+    else
+      @view.active = false
+    end
+
+    refresh
+  end
+
+  def handle!(event : SF::Event::KeyPressed)
+    case event.code
+    when .up?    then @state.to_prev(circular: true)
+    when .down?  then @state.to_next(circular: true)
+    when .home?  then @state.to_first
+    when .end?   then @state.to_last
+    when .enter? then on_accepted(@state.selected)
+    else
+      return
+    end
+
+    refresh
+  end
+
+  def handle!(event : SF::Event::MouseButtonPressed)
+    unless ord = @view.ord_at(SF.vector2f(event.x, event.y))
+      blur
+      return
+    end
+
+    @state.to_nth(ord)
+    refresh
+
+    on_accepted(@state.selected)
+  end
+
+  def focus
+    @view.active = true
+
+    super
+  end
+
+  def blur
+    @view.active = false
+
+    super
   end
 
   def refresh
@@ -276,24 +382,31 @@ end
 # around, create new ones using double-click and a menu, etc.
 #
 # Implement simple menu with the following items:
-# [ ] "Birth rule" (creates a birth rule onclick)
-# [ ] "Heartbeat rule" (creates a heartbeat rule onclick)
-# [ ] "Keyword rule" (creates a keyword rule onclick)
-# [ ] "Protocol" (creates a protocol pane onclick)
-# [ ] Open this menu on double click
-# [ ] When the user starts typing with nothing selected, create
-#     a new keyword rule and redirect input there
-# [ ] When dragging *from* this little circle, draw an arrow pointing
-#     at where the cursor is. The arrow is of the custom color
-# [ ] When cursor is released over empty space, create a
-#     "protocol" pane there which will have the arrow connected
-#      to it.
-# [ ] The "protocol" pane allows to specify the name of the protocol
+# # [x] The "protocol" pane allows to specify the name of the protocol
 #     or leave it unnamed.
-# [ ] If the cursor is over an existing protocol pane, draw a halo
-#     around it.
-# [ ] If the cursor is released over an existing protocol pane,
-#     connect the arrow to it.
+# [x] "Birth rule"
+#     creates a birth rule onclick [ ]
+# [x] "Heartbeat rule"
+#     creates a heartbeat rule onclick [ ]
+# [x] "Keyword rule"
+#     creates a keyword rule onclick [ ]
+# [x] "Protocol"
+#     creates a protocol pane onclick [ ]
+# [ ] GraphState, GraphView to record & display connections
+#     between rules & protocols
+# [ ] CellEditorState, CellEditorView, CellEditor
+#   [ ] Open menu on double click
+#   [ ] When the user starts typing with nothing selected, create
+#       a new keyword rule and redirect input there
+#   [ ] When dragging *from* this little circle, draw an arrow pointing
+#       at where the cursor is. The arrow is of the custom color
+#   [ ] When cursor is released over empty space, create a
+#      "protocol" pane there which will have the arrow connected
+#       to it.
+#   [ ] If the cursor is over an existing protocol pane, draw a halo
+#       around it.
+#   [ ] If the cursor is released over an existing protocol pane,
+#       connect the arrow to it.
 #
 # [ ] Fill a ProtocolCollection from UI, set UI from a ProtocolCollection
 #
@@ -367,19 +480,14 @@ ped_view.position = SF.vector2f(10, 10)
 ped = ProtocolEditor.new(ped_state, ped_view)
 
 menu_state = MenuState.new
-menu_state.append("New birth rule")
-menu_state.append("New keyword rule")
-menu_state.append("New heartbeat rule")
-menu_state.append("New protocol")
-menu_state.append("Test item...")
 
 menu_view = MenuView.new
-menu_view.append_icon(Icon::BirthRule)
-menu_view.append_icon(Icon::KeywordRule)
-menu_view.append_icon(Icon::HeartbeatRule)
-menu_view.append_icon(Icon::Protocol)
 menu_view.position = SF.vector2f(300, 10)
 menu = Menu.new(menu_state, menu_view)
+menu.append("New birth rule", Icon::BirthRule)
+menu.append("New keyword rule", Icon::KeywordRule)
+menu.append("New heartbeat rule", Icon::HeartbeatRule)
+menu.append("New protocol", Icon::Protocol)
 
 window = SF::RenderWindow.new(SF::VideoMode.new(800, 600), title: "App", settings: SF::ContextSettings.new(depth: 24, antialiasing: 8))
 window.framerate_limit = 60
@@ -387,6 +495,10 @@ window.framerate_limit = 60
 focus = nil
 
 while window.open?
+  if focus && !focus.focused? # element blurred itself
+    focus = nil
+  end
+
   while event = window.poll_event
     case event
     when SF::Event::Closed then window.close
