@@ -95,7 +95,7 @@ class BirthRuleEditorView < RuleEditorView
     icon.position = position + SF.vector2f(padding.x, 0)
 
     cap = SF::Text.new(caption.trunc(caption_max_chars), FONT_BOLD, 11)
-    cap.position = icon.position + SF.vector2f(icon_span_x, 0)
+    cap.position = (icon.position + SF.vector2f(icon_span_x, 0)).to_i
     cap.fill_color = caption_color
 
     #
@@ -123,4 +123,5 @@ class BirthRuleEditor
   include BufferEditorRowHandler
   include BufferEditorColumnHandler
   include RuleEditorHandler
+  include CellEditorEntity
 end

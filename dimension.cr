@@ -377,9 +377,6 @@ abstract class DimensionView(View, Instant, SubInstant)
 
   property position = SF.vector2f(0, 0)
 
-  # Returns whether this dimension view is active.
-  property? active = false
-
   def initialize
     @views = [] of View
     @selected = 0

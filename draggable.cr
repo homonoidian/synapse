@@ -18,11 +18,14 @@ module Draggable(State)
   def on_drag_end
   end
 
+  # Acquires *grip* at position.
+  def grab(@grip)
+    on_drag_start
+  end
+
   # Acquires grip.
   def handle!(editor : State, event : SF::Event::MouseButtonPressed)
-    @grip = SF.vector2f(event.x, event.y)
-
-    on_drag_start
+    grab SF.vector2f(event.x, event.y)
   end
 
   # Releases grip.

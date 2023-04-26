@@ -2,6 +2,9 @@
 module IView
   include SF::Drawable
 
+  # Determines whether this view is active.
+  property? active = false
+
   # Returns the position of this view.
   abstract def position
 

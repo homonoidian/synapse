@@ -89,7 +89,7 @@ class InputFieldView < BufferEditorView
       sprite.position = position
       sprite.draw(target, states)
     else
-      delta = position - @text.position
+      delta = (position - @text.position).to_i
 
       @text.position += delta
       @beam.position += delta

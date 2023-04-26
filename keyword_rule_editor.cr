@@ -172,4 +172,5 @@ class KeywordRuleEditor
   include BufferEditorRowHandler
   include KeywordRuleEditorHandler
   include RuleEditorHandler
+  include CellEditorEntity
 end

@@ -3,6 +3,14 @@ require "lch"
 
 require "./ext"
 
+module CellEditorEntity # FIXME: ???
+  def move(position : SF::Vector2)
+    @view.position = position
+
+    refresh
+  end
+end
+
 require "./line"
 require "./buffer"
 require "./controller"
@@ -64,7 +72,6 @@ class LabelView
   include IView
 
   property position = SF.vector2f(0, 0)
-  property? active = false
 
   def initialize
     @text = SF::Text.new("", font, font_size)
@@ -275,6 +282,13 @@ class Menu
 
   def initialize(@state : MenuState, @view : MenuView)
     @focused = @view.active?
+    @listeners = [] of MenuItemInstant ->
+
+    refresh
+  end
+
+  def move(x : Number, y : Number)
+    @view.position = SF.vector2f(x, y)
 
     refresh
   end
@@ -285,8 +299,12 @@ class Menu
     refresh
   end
 
-  def on_accepted(item : MenuItemState)
-    puts "Clicked: #{item.capture.inspect}"
+  def accepted(&callback : MenuItemInstant ->)
+    @listeners << callback
+  end
+
+  def on_accepted(instant : MenuItemInstant)
+    @listeners.each &.call(instant)
   end
 
   def includes?(point : SF::Vector2)
@@ -310,7 +328,7 @@ class Menu
     when .down?  then @state.to_next(circular: true)
     when .home?  then @state.to_first
     when .end?   then @state.to_last
-    when .enter? then on_accepted(@state.selected)
+    when .enter? then on_accepted(@state.selected.capture)
     else
       return
     end
@@ -318,7 +336,7 @@ class Menu
     refresh
   end
 
-  def handle!(event : SF::Event::MouseButtonPressed)
+  def handle!(event : SF::Event::MouseButtonReleased)
     unless ord = @view.ord_at(SF.vector2f(event.x, event.y))
       blur
       return
@@ -327,7 +345,7 @@ class Menu
     @state.to_nth(ord)
     refresh
 
-    on_accepted(@state.selected)
+    on_accepted(@state.selected.capture)
   end
 
   def focus
@@ -354,6 +372,196 @@ class Menu
 
   def draw(target, states)
     @view.draw(target, states)
+  end
+end
+
+class CellEditor
+  include SF::Drawable
+
+  @menu : Menu
+  @selected : Int32?
+
+  def initialize
+    @mouse = SF.vector2f(0, 0)
+    @menu = new_menu
+    @entities = [] of CellEditorEntity
+  end
+
+  def new_menu
+    menu = Menu.new(MenuState.new, MenuView.new)
+    menu.append("New birth rule", Icon::BirthRule)
+    menu.append("New keyword rule", Icon::KeywordRule)
+    menu.append("New heartbeat rule", Icon::HeartbeatRule)
+    menu.append("New protocol", Icon::Protocol)
+    menu.accepted(&->on_menu_item_accepted(MenuItemInstant))
+    menu
+  end
+
+  def new_birth_rule
+    view = BirthRuleEditorView.new
+
+    rule = BirthRuleEditor.new(BirthRuleEditorState.new, view)
+    rule
+  end
+
+  def new_keyword_rule
+    view = KeywordRuleEditorView.new
+
+    rule = KeywordRuleEditor.new(KeywordRuleEditorState.new, view)
+    rule
+  end
+
+  def new_heartbeat_rule
+    view = HeartbeatRuleEditorView.new
+
+    rule = HeartbeatRuleEditor.new(HeartbeatRuleEditorState.new, view)
+    rule
+  end
+
+  def new_protocol
+    view = ProtocolEditorView.new
+
+    rule = ProtocolEditor.new(ProtocolEditorState.new, view)
+    rule
+  end
+
+  def empty?
+    @entities.empty?
+  end
+
+  def selected?
+    @menu.focused? ? @menu : @selected.try { |index| @entities[index] }
+  end
+
+  def activate(index : Int32)
+    focus = selected?
+    entity = @entities[index]
+
+    return unless focus.nil? || focus.can_blur?
+    return unless entity.can_focus?
+
+    focus.try &.blur
+    entity.focus
+
+    # Swap top and selected indices.
+    @entities.swap(index, @entities.size - 1)
+
+    @selected = @entities.size - 1
+  end
+
+  def activate(index : Nil)
+    focus = selected?
+    return unless focus.nil? || focus.can_blur?
+
+    focus.try &.blur
+    @selected = nil
+  end
+
+  def forward(event : SF::Event)
+    return unless entity = selected?
+
+    entity.handle(event)
+  end
+
+  def put_editor(editor, grab = true)
+    @entities << editor
+
+    #
+    # Activate the editor and grab by the midpoint.
+    #
+    activate(@entities.size - 1)
+
+    if grab
+      editor.move(@mouse - editor.@view.size/2)
+      editor.grab(@mouse)
+    else
+      editor.move(@mouse)
+    end
+  end
+
+  def on_menu_item_accepted(instant : MenuItemInstant)
+    case instant.caption
+    when "New birth rule"
+      editor = new_birth_rule
+    when "New keyword rule"
+      editor = new_keyword_rule
+    when "New heartbeat rule"
+      editor = new_heartbeat_rule
+    when "New protocol"
+      editor = new_protocol
+    else
+      return
+    end
+
+    # Blur the menu and add the editor to the list of entities.
+    # Note that order matters here!
+    @menu.blur
+
+    put_editor(editor)
+  end
+
+  def handle(event : SF::Event::MouseButtonPressed)
+    focus = selected?
+    @mouse = mouse = SF.vector2f(event.x, event.y)
+
+    if focus && mouse.in?(focus)
+      forward(event)
+      return
+    end
+
+    case event.button
+    when .left?
+      @menu.blur
+
+      (0...@entities.size).reverse_each do |index|
+        entity = @entities.unsafe_fetch(index)
+
+        next unless mouse.in?(entity)
+
+        activate(index)
+        forward(event)
+        return
+      end
+
+      activate(nil)
+    when .right?
+      @menu.move(mouse.x, mouse.y)
+      @menu.focus
+    end
+  end
+
+  def handle(event : SF::Event::TextEntered)
+    if selected?
+      forward(event)
+      return
+    end
+
+    chr = event.unicode.chr
+    return unless chr.printable?
+
+    editor = new_keyword_rule
+
+    put_editor(editor, grab: false)
+
+    forward(event)
+  end
+
+  def handle(event : SF::Event::MouseMoved)
+    @mouse = SF.vector2f(event.x, event.y)
+
+    forward(event)
+  end
+
+  def handle(event : SF::Event)
+    forward(event)
+  end
+
+  def draw(target, states)
+    @entities.each &.draw(target, states)
+
+    if @menu.focused?
+      @menu.draw(target, states)
+    end
   end
 end
 
@@ -385,29 +593,32 @@ end
 # # [x] The "protocol" pane allows to specify the name of the protocol
 #     or leave it unnamed.
 # [x] "Birth rule"
-#     creates a birth rule onclick [ ]
+#     creates a birth rule onclick [x]
 # [x] "Heartbeat rule"
-#     creates a heartbeat rule onclick [ ]
+#     creates a heartbeat rule onclick [x]
 # [x] "Keyword rule"
-#     creates a keyword rule onclick [ ]
+#     creates a keyword rule onclick [x]
 # [x] "Protocol"
-#     creates a protocol pane onclick [ ]
+#     creates a protocol pane onclick [x]
+# [x] Open menu on RMB
+# [x] When the user starts typing with nothing selected, create
+#     a new keyword rule and redirect input there
 # [ ] GraphState, GraphView to record & display connections
-#     between rules & protocols
+#     between rules & protocols (here the custom colors are set (but not emitted!),
+#     circles [aka vertices] and edges are drawn etc)
 # [ ] CellEditorState, CellEditorView, CellEditor
-#   [ ] Open menu on double click
-#   [ ] When the user starts typing with nothing selected, create
-#       a new keyword rule and redirect input there
+#   [ ] emits colors for GraphView, is able to create/remove rules and
+#       protocols & create links between rules&protocols.
 #   [ ] When dragging *from* this little circle, draw an arrow pointing
 #       at where the cursor is. The arrow is of the custom color
-#   [ ] When cursor is released over empty space, create a
-#      "protocol" pane there which will have the arrow connected
-#       to it.
-#   [ ] If the cursor is over an existing protocol pane, draw a halo
-#       around it.
-#   [ ] If the cursor is released over an existing protocol pane,
-#       connect the arrow to it.
-#
+#     [ ] When cursor is released over empty space, create a
+#        "protocol" pane there which will have the arrow connected
+#         to it.
+#     [ ] If the cursor is over an existing protocol pane, draw a halo
+#         around it.
+#     [ ] If the cursor is released over an existing protocol pane,
+#         connect the arrow to it.
+# [ ] add a way to display errors in rules
 # [ ] Fill a ProtocolCollection from UI, set UI from a ProtocolCollection
 #
 # [ ] Rules can send and receive *targeted*, internal messages. I.e.,
@@ -459,93 +670,20 @@ end
 # [ ] Replace the current Protocol/Rule/ProtocolEditor system
 #     with this new one.
 
-ked_state = KeywordRuleEditorState.new
-ked_view = KeywordRuleEditorView.new
-ked_view.position = SF.vector2f(100, 200)
-ked = KeywordRuleEditor.new(ked_state, ked_view)
-
-bed_state = BirthRuleEditorState.new
-bed_view = BirthRuleEditorView.new
-bed_view.position = SF.vector2f(100, 300)
-bed = BirthRuleEditor.new(bed_state, bed_view)
-
-hed_state = HeartbeatRuleEditorState.new
-hed_view = HeartbeatRuleEditorView.new
-hed_view.position = SF.vector2f(100, 400)
-hed = HeartbeatRuleEditor.new(hed_state, hed_view)
-
-ped_state = ProtocolEditorState.new
-ped_view = ProtocolEditorView.new
-ped_view.position = SF.vector2f(10, 10)
-ped = ProtocolEditor.new(ped_state, ped_view)
-
-menu_state = MenuState.new
-
-menu_view = MenuView.new
-menu_view.position = SF.vector2f(300, 10)
-menu = Menu.new(menu_state, menu_view)
-menu.append("New birth rule", Icon::BirthRule)
-menu.append("New keyword rule", Icon::KeywordRule)
-menu.append("New heartbeat rule", Icon::HeartbeatRule)
-menu.append("New protocol", Icon::Protocol)
-
 window = SF::RenderWindow.new(SF::VideoMode.new(800, 600), title: "App", settings: SF::ContextSettings.new(depth: 24, antialiasing: 8))
 window.framerate_limit = 60
 
-focus = nil
+editor = CellEditor.new
 
 while window.open?
-  if focus && !focus.focused? # element blurred itself
-    focus = nil
-  end
-
   while event = window.poll_event
     case event
     when SF::Event::Closed then window.close
-    when SF::Event::MouseButtonPressed
-      case SF.vector2f(event.x, event.y)
-      when .in?(ked)
-        if !focus.same?(ked) && ((focus.nil? || focus.can_blur?) && ked.can_focus?)
-          focus.try &.blur
-          ked.focus
-          focus = ked
-        end
-      when .in?(bed)
-        if !focus.same?(bed) && ((focus.nil? || focus.can_blur?) && bed.can_focus?)
-          focus.try &.blur
-          bed.focus
-          focus = bed
-        end
-      when .in?(hed)
-        if !focus.same?(hed) && ((focus.nil? || focus.can_blur?) && hed.can_focus?)
-          focus.try &.blur
-          hed.focus
-          focus = hed
-        end
-      when .in?(ped)
-        if !focus.same?(ped) && ((focus.nil? || focus.can_blur?) && ped.can_focus?)
-          focus.try &.blur
-          ped.focus
-          focus = ped
-        end
-      when .in?(menu)
-        if !focus.same?(menu) && ((focus.nil? || focus.can_blur?) && menu.can_focus?)
-          focus.try &.blur
-          menu.focus
-          focus = menu
-        end
-      else
-        focus.try &.blur
-        focus = nil
-      end
     end
-    focus.try &.handle(event)
+    editor.handle(event)
   end
+
   window.clear(SF::Color.new(0x21, 0x21, 0x21))
-  window.draw(ked)
-  window.draw(bed)
-  window.draw(hed)
-  window.draw(ped)
-  window.draw(menu)
+  window.draw(editor)
   window.display
 end

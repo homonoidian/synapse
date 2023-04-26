@@ -153,7 +153,7 @@ class ProtocolEditorView < InputFieldRowView
     icon.draw(target, states)
 
     cap = SF::Text.new(caption.trunc(caption_max_chars), FONT, 11)
-    cap.position = icon.position + SF.vector2f(icon_span_x, 0)
+    cap.position = (icon.position + SF.vector2f(icon_span_x, 0)).to_i
     cap.fill_color = caption_color
     cap.draw(target, states)
 
@@ -172,4 +172,5 @@ class ProtocolEditor
   include BufferEditorHandler
   include BufferEditorRowHandler
   include ProtocolEditorHandler
+  include CellEditorEntity
 end
