@@ -1,26 +1,28 @@
+abstract struct DragEvent
+end
+
+record DragEvent::Grabbed < DragEvent
+record DragEvent::Dragged < DragEvent
+record DragEvent::Dropped < DragEvent
+
 # Naïve draggability support for `IController`.
 #
 # * When mouse button is pressed, grip is acquired.
 # * When mouse button is released, grip is released.
 # * When mouse is moved, translates the includer's view.
+#
+# `DragEvent`s (grabbed, dragged, dropped) are sent to the
+# `motion` stream, which you can listen to for e.g. drag-
+# specific actions.
 module Draggable(State)
+  # The stream of positions of the underlying view, when dragged.
+  getter dragging = Stream(DragEvent).new
+
   @grip : SF::Vector2f?
-
-  # Invoked when dragging starts.
-  #
-  # Noop by default.
-  def on_drag_start
-  end
-
-  # Invoked when dragging ends.
-  #
-  # Noop by default.
-  def on_drag_end
-  end
 
   # Acquires *grip* at position.
   def grab(@grip)
-    on_drag_start
+    dragging.emit(DragEvent::Grabbed.new)
   end
 
   # Acquires grip.
@@ -34,7 +36,7 @@ module Draggable(State)
 
     @grip = nil
 
-    on_drag_end
+    dragging.emit(DragEvent::Dropped.new)
   end
 
   # Translates the underlying view to where the mouse is, and
@@ -47,6 +49,8 @@ module Draggable(State)
 
     @view.position += delta
     @grip = mouse
+
+    dragging.emit(DragEvent::Dragged.new)
 
     refresh
   end

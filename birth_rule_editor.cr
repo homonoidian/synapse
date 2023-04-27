@@ -122,6 +122,6 @@ class BirthRuleEditor
   include BufferEditorHandler
   include BufferEditorRowHandler
   include BufferEditorColumnHandler
-  include RuleEditorHandler
   include CellEditorEntity
+  include RuleEditorHandler
 end

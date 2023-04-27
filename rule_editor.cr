@@ -85,11 +85,11 @@ end
 module RuleEditorHandler
   include Draggable(RuleEditorState)
 
-  def on_drag_start
+  def lift
     @view.shadow = true
   end
 
-  def on_drag_end
+  def drop
     @view.shadow = false
   end
 end

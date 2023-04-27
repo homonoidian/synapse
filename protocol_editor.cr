@@ -58,6 +58,10 @@ class ProtocolEditorView < InputFieldRowView
 
   @id : UUID?
 
+  # Determines whether to show slightly outset, semi-transparent
+  # halo around this protocol editor.
+  property? halo = false
+
   def new_subview_for(index : Int)
     view = ProtocolNameEditorView.new
     view.max_width = max_width
@@ -99,6 +103,11 @@ class ProtocolEditorView < InputFieldRowView
     active? ? SF::Color.new(0x43, 0x51, 0x80) : SF::Color.new(0x3f, 0x3f, 0x3f)
   end
 
+  # Specifies the color of the halo.
+  def halo_color
+    SF::Color.new(0x80, 0xaf, 0xf2)
+  end
+
   def icon
     Icon::Protocol
   end
@@ -133,7 +142,7 @@ class ProtocolEditorView < InputFieldRowView
     bgrect.position = position
     bgrect.size = size
     bgrect.outline_thickness = 2
-    bgrect.outline_color = outline_color
+    bgrect.outline_color = halo? ? halo_color : outline_color
     bgrect.draw(target, states)
 
     #
@@ -173,4 +182,6 @@ class ProtocolEditor
   include BufferEditorRowHandler
   include ProtocolEditorHandler
   include CellEditorEntity
+
+  delegate :halo?, :halo=, to: @view
 end

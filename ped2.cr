@@ -1,13 +1,25 @@
 require "crsfml"
 require "lch"
-
 require "./ext"
+require "./stream"
 
 module CellEditorEntity # FIXME: ???
+  delegate :position, :position=, to: @view
+
+  def size
+    @view.size
+  end
+
   def move(position : SF::Vector2)
     @view.position = position
 
     refresh
+  end
+
+  def lift
+  end
+
+  def drop
   end
 end
 
@@ -287,6 +299,8 @@ class Menu
     refresh
   end
 
+  delegate :active=, :active?, to: @view
+
   def move(x : Number, y : Number)
     @view.position = SF.vector2f(x, y)
 
@@ -337,10 +351,7 @@ class Menu
   end
 
   def handle!(event : SF::Event::MouseButtonReleased)
-    unless ord = @view.ord_at(SF.vector2f(event.x, event.y))
-      blur
-      return
-    end
+    return unless ord = @view.ord_at(SF.vector2f(event.x, event.y))
 
     @state.to_nth(ord)
     refresh
@@ -385,6 +396,64 @@ class CellEditor
     @mouse = SF.vector2f(0, 0)
     @menu = new_menu
     @entities = [] of CellEditorEntity
+    @vertices = [] of {ProtocolEditor, CellEditorEntity}
+    @dragging = Stream({CellEditorEntity, DragEvent}).new
+    @dragging.each { |subject, event| on_motion(subject, event) }
+  end
+
+  def can_connect?(entity, subject, point)
+    point.in?(entity) && !@vertices.any?({entity, subject})
+  end
+
+  def on_motion(subject, event : DragEvent::Grabbed)
+  end
+
+  def on_motion(subject, event : DragEvent::Dragged)
+    subject.lift
+
+    if subject.is_a?(ProtocolEditor)
+      subject.halo = false
+      return
+    end
+
+    @entities.each do |entity|
+      # Halo the protocol editor below the moved entity (if any).
+      next unless entity.is_a?(ProtocolEditor)
+
+      entity.halo = can_connect?(entity, subject, @mouse)
+    end
+  end
+
+  def on_motion(subject, event : DragEvent::Dropped)
+    subject.drop
+
+    if subject.is_a?(ProtocolEditor)
+      subject.halo = false
+      return
+    end
+
+    connected = false
+    subject_index = @entities.size - 1
+
+    @entities.each_with_index do |entity, index|
+      if entity.same?(subject)
+        subject_index = index
+      end
+
+      next unless entity.is_a?(ProtocolEditor)
+
+      if can_connect?(entity, subject, @mouse)
+        @vertices << {entity, subject}
+        connected = true
+      end
+
+      entity.halo = false
+    end
+
+    return unless connected
+
+    # Pick up again
+    lift(subject_index, grab: true)
   end
 
   def new_menu
@@ -399,14 +468,12 @@ class CellEditor
 
   def new_birth_rule
     view = BirthRuleEditorView.new
-
     rule = BirthRuleEditor.new(BirthRuleEditorState.new, view)
     rule
   end
 
   def new_keyword_rule
     view = KeywordRuleEditorView.new
-
     rule = KeywordRuleEditor.new(KeywordRuleEditorState.new, view)
     rule
   end
@@ -457,26 +524,36 @@ class CellEditor
     @selected = nil
   end
 
+  # Activate the entity at *index* and grabs it by the midpoint.
+  def lift(index : Int, grab = false)
+    subject = @entities[index]
+
+    activate(index)
+
+    if grab
+      subject.move(@mouse - subject.size/2)
+      subject.grab(@mouse)
+      subject.refresh
+    else
+      subject.move(@mouse)
+    end
+  end
+
   def forward(event : SF::Event)
     return unless entity = selected?
 
     entity.handle(event)
   end
 
-  def put_editor(editor, grab = true)
+  def put_editor(editor : CellEditorEntity, grab = true)
     @entities << editor
 
-    #
-    # Activate the editor and grab by the midpoint.
-    #
-    activate(@entities.size - 1)
+    # Forward dragging of the editor to the common dragging stream.
+    editor.dragging
+      .map { |event| {editor.as(CellEditorEntity), event} }
+      .notifies(@dragging)
 
-    if grab
-      editor.move(@mouse - editor.@view.size/2)
-      editor.grab(@mouse)
-    else
-      editor.move(@mouse)
-    end
+    lift(@entities.size - 1, grab)
   end
 
   def on_menu_item_accepted(instant : MenuItemInstant)
@@ -525,8 +602,10 @@ class CellEditor
 
       activate(nil)
     when .right?
-      @menu.move(mouse.x, mouse.y)
+      @menu.move(mouse.x + 5, mouse.y + 5)
       @menu.focus
+      @menu.active = false
+      @menu.refresh
     end
   end
 
@@ -557,6 +636,15 @@ class CellEditor
   end
 
   def draw(target, states)
+    vertices = SF::VertexArray.new(SF::Lines)
+
+    @vertices.each do |from, to|
+      vertices.append SF::Vertex.new(from.position + from.size/2, SF::Color.new(0x43, 0x51, 0x80))
+      vertices.append SF::Vertex.new(to.position + to.size/2, SF::Color.new(0x43, 0x51, 0x80))
+    end
+
+    vertices.draw(target, states)
+
     @entities.each &.draw(target, states)
 
     if @menu.focused?
@@ -603,21 +691,10 @@ end
 # [x] Open menu on RMB
 # [x] When the user starts typing with nothing selected, create
 #     a new keyword rule and redirect input there
-# [ ] GraphState, GraphView to record & display connections
-#     between rules & protocols (here the custom colors are set (but not emitted!),
-#     circles [aka vertices] and edges are drawn etc)
-# [ ] CellEditorState, CellEditorView, CellEditor
-#   [ ] emits colors for GraphView, is able to create/remove rules and
-#       protocols & create links between rules&protocols.
-#   [ ] When dragging *from* this little circle, draw an arrow pointing
-#       at where the cursor is. The arrow is of the custom color
-#     [ ] When cursor is released over empty space, create a
-#        "protocol" pane there which will have the arrow connected
-#         to it.
-#     [ ] If the cursor is over an existing protocol pane, draw a halo
-#         around it.
-#     [ ] If the cursor is released over an existing protocol pane,
-#         connect the arrow to it.
+# [x] allow to connect rules to protocols
+# [x] fix no shadow after release over protocol
+# [ ] allow rectangular select of editors: motion, deletion.
+# [ ] allow to undo/redo editor motion, deletion *when nothing is focused*.
 # [ ] add a way to display errors in rules
 # [ ] Fill a ProtocolCollection from UI, set UI from a ProtocolCollection
 #
