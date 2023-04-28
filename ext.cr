@@ -122,6 +122,10 @@ struct Vector2
     @x < other.x || @y < other.y
   end
 
+  def <=(other : Vector2)
+    @x <= other.x || @y <= other.y
+  end
+
   # Returns the components of this vector in a tuple.
   def xy
     {@x, @y}

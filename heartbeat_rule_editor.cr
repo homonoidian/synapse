@@ -1,6 +1,10 @@
 # State for a heartbeat rule editor. Almost identical to
 # `KeywordRuleEditorState`, hence the subclassing.
 class HeartbeatRuleEditorState < KeywordRuleEditorState
+  def to_rule(signature : RuleSignature, code : String) : Rule
+    HeartbeatRule.new(signature, code)
+  end
+
   def new_substate_for(index : Int)
     {HeartbeatRuleHeaderState, RuleCodeRowState}[index].new
   end

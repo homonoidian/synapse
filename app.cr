@@ -29,8 +29,9 @@ require "./view"
 require "./controller"
 require "./buffer_editor"
 require "./expression_context"
-require "./protocol"
+# require "./protocol"
 require "./entity_collection"
+require "./ped2"
 
 FONT        = SF::Font.from_memory({{read_file("./fonts/code/scientifica.otb")}}.to_slice)
 FONT_BOLD   = SF::Font.from_memory({{read_file("./fonts/code/scientificaBold.otb")}}.to_slice)
@@ -421,525 +422,529 @@ class Vesicle < RoundEntity
   end
 end
 
-# An excerpt with a beginning and an end. Keeps positional
-# information in sync with the excerpt string.
-#
-# Note that in the excerpt range, the end point is excluded.
-# That is, the excerpt range is [b; e)
-record Excerpt, string : String, start : Int32 do
-  # Returns the end index of this excerpt in the source string.
-  def end : Int
-    start + string.size
-  end
-
-  # Maps *index* in this excerpt to the corresponding index in
-  # the source string.
-  def map(index : Int) : Int
-    start + index
-  end
-
-  # Removes whitespace from the left and right of this excerpt.
-  # Adjusts positional information accordingly.
-  def strip : Excerpt
-    orig = string
-
-    lstr = orig.lstrip
-    rstr = lstr.rstrip
-
-    Excerpt.new(
-      string: rstr,
-      start: start + (orig.size - lstr.size),
-    )
-  end
-
-  # Concatenates this and *other* excerpts.
-  #
-  # *other* excerpt must start immediately after this excerpt.
-  # That is, its beginning must be the same as this excerpt's
-  # end. Otherwise, this method will raise.
-  def +(other : Excerpt)
-    unless other.start == self.end
-      raise ArgumentError.new("'+': right bounded excerpt must follow the left bounded excerpt")
-    end
-
-    Excerpt.new(string + other.string, start)
-  end
-end
-
-# Represents the result of parsing a block. It's optionally
-# a rule, plus zero or more markers.
-record ParseResult, rule : Rule? = nil, markers = [] of Marker do
-  # A shorthand for an error result with no rule and a single
-  # hint marker.
-  def self.hint(offset : Int, message : String)
-    new(markers: [Marker.hint(offset, message)])
-  end
-
-  # A shorthand for a success result with `KeywordRule` rule
-  # and no markers.
-  def self.keyword(keyword : Excerpt, params : Array(Excerpt), lua : Excerpt)
-    new(rule: KeywordRule.new(keyword, params, lua))
-  end
-
-  # A shorthand for a success result with `HeartbeatRule` rule
-  # and no markers.
-  def self.heartbeat(keyword : Excerpt, lua : Excerpt, period : Time::Span? = nil)
-    new(rule: HeartbeatRule.new(keyword, lua, period))
-  end
-end
-
-# Blocks are intermediates between raw source and `Rule`s.
-abstract struct Block
-  # Tries to convert this block into the corresponding `Rule`.
-  abstract def to_rule : ParseResult
-end
-
-# Birth blocks are implicit blocks that consist of code only,
-# and are later converted into `BirthRule`s.
-#
-# ```synapse
-# -- The following Lua code will be stored under the birth
-# -- block/birth rule.
-# x = 123
-# y = 456
-# z = "hello world"
-#
-# heartbeat |
-#   -- And this is going to be stored under a rule block /
-#   -- keyword rule (heartbeat)
-#   x = x + 1
-# ```
-record BirthBlock < Block, code : Excerpt do
-  def to_rule : ParseResult
-    ParseResult.new rule: BirthRule.new(code)
-  end
-end
-
-record RuleBlock < Block, header : Excerpt, code : Excerpt do
-  def to_rule : ParseResult
-    scanner = StringScanner.new(header.string)
-
-    #
-    # Parse message keyword.
-    #
-    # <messageKeyword> ::= <alpha> <alnum>*
-    #
-    start = header.map(scanner.offset)
-    unless keyword = scanner.scan(/(?:[A-Za-z]\w*|\*)/)
-      return ParseResult.hint(start, "I want keyword (aka message name) here!")
-    end
-
-    heartbeat = keyword == "heartbeat"
-    keyword = Excerpt.new(keyword, start)
-
-    if heartbeat
-      #
-      # Parse heartbeat. Heartbeat does not take parameters.
-      # It's either a period or the pipe.
-      #
-      # <heartbeat> ::= "heartbeat" WS (<period> | "|")
-      #
-      start = header.map(scanner.offset)
-
-      unless scanner.scan(/[ \t]+/)
-        return ParseResult.hint(start, "I want whitespace here!")
-      end
-
-      start = header.map(scanner.offset)
-
-      if number = scanner.scan(/[1-9][0-9]*/)
-        start = header.map(scanner.offset)
-
-        unless unit = scanner.scan(/m?s/)
-          return ParseResult.hint(start, "I want a time unit here, either 'ms' (for milliseconds) or 's' (for seconds)")
-        end
-
-        case unit
-        when "ms"
-          period = number.to_i.milliseconds
-        when "s"
-          period = number.to_i.seconds
-        end
-      end
-
-      result = ParseResult.heartbeat(keyword, code, period)
-    else
-      #
-      # Parse message parameters. Parameters follow the keyword,
-      # therefore, a leading whitespace is always expected.
-      #
-      # <params> ::= (WS <param>)*
-      # <param> ::= <alpha> <alnum>*
-      #
-      start = header.map(scanner.offset)
-      params = [] of Excerpt
-      while param = scanner.scan(/[ \t]+(?:[A-Za-z]\w*)/)
-        params << Excerpt.new(param, start).strip
-        start = header.map(scanner.offset)
-      end
-
-      result = ParseResult.keyword(keyword, params, code)
-    end
-
-    #
-    # Make sure that the pipe character itself is in the
-    # right place.
-    #
-    unless scanner.scan(/[ \t]*\|/)
-      return ParseResult.hint(header.map(scanner.offset), "I want space followed by pipe '|' here!")
-    end
-
-    result
-  end
-end
-
-record Marker, color : SF::Color, offset : Int32, tally : Hash(String, Int32) do
-  def initialize(color, offset, message : String)
-    hash = Hash(String, Int32).new(0)
-
-    initialize(color, offset, message.lines.tally_by(hash, &.itself))
-  end
-
-  def self.hint(offset, message)
-    hint_color = SF::Color.new(0xFF, 0xCA, 0x28)
-    new(hint_color, offset, message)
-  end
-
-  def message
-    String.build do |io|
-      tally.each do |line, count|
-        io << line
-        unless count == 1
-          io << "(x" << count << ")"
-        end
-      end
-    end
-  end
-
-  def stack(other : Marker)
-    tally.merge!(other.tally) do |_, l, r|
-      l + r
-    end
-
-    self
-  end
-end
-
-alias MarkerCollection = Hash(Int32, Marker)
-
-class ProtocolEditorState
-  getter id : UUID             # TODO: remove
-  property protocol : Protocol # TODO: remove
-  property? sync : Bool        # TODO: remove
-  getter bstate                # TODO: remove
-  getter markers               # TODO: remove
-
-  def initialize(@protocol, @bstate = BufferEditorState.new, @markers = MarkerCollection.new, @sync = true)
-    @id = UUID.random
-  end
-
-  delegate :cursor, :cursor=, to: @bstate   # TODO: remove
-  delegate :buffer, :buffer=, to: @bstate   # TODO: remove
-  delegate :markers, :markers=, to: @bstate # TODO: remove
-end
-
-class ProtocolEditor
-  include SF::Drawable
-
-  getter state # TODO: remove
-
-  def initialize(@cell : Cell, @state : ProtocolEditorState)
-    @editor_view = BufferEditorView.new
-    @editor_view.active = true
-    @editor = BufferEditor.new(@state.bstate, @editor_view)
-  end
-
-  def initialize(cell : Cell, protocol : Protocol)
-    initialize(cell, ProtocolEditorState.new(protocol))
-  end
-
-  def initialize(cell : Cell, other : ProtocolEditor)
-    initialize(cell, other.state)
-  end
-
-  # TODO: remove
-  private delegate :protocol, :protocol=, to: @state
-  # TODO: remove
-  private delegate :markers, :markers=, to: @state
-  # TODO: remove
-  private delegate :sync?, :sync=, to: @state
-
-  # Editor needs to be refreshed when protocoleditor is focused
-  # because other cells that have the same protocol (copies) may
-  # have altered it.
-  def refresh
-    @editor.refresh
-  end
-
-  def update
-    before = @state.bstate.capture
-    yield
-    after = @state.bstate.capture
-
-    unless before == after
-      markers.clear
-
-      parse(after.string)
-    end
-  end
-
-  def unsync(err : ErrResult)
-    # Signal that what's currently running is out of sync from
-    # what's being shown.
-    self.sync = false
-
-    mark(SF::Color::Red, err.index, err.error.message || "lua error")
-  end
-
-  def mark(color : SF::Color, offset : Int32, message : String)
-    mark Marker.new(color, offset, message)
-  end
-
-  def mark(marker : Marker)
-    # FIXME: this is MarkerCollection business!
-    if prev = markers[marker.offset]?
-      marker = prev.stack(marker)
-    end
-
-    markers[marker.offset] = marker
-  end
-
-  def editor_handle(buf, event)
-  end
-
-  def handle(event)
-    update { @editor.handle(event) }
-  end
-
-  def rules_in(source : String)
-    stack = [BirthBlock.new(Excerpt.new("", 0))] of Block
-    offset = 0
-    results = [] of ParseResult
-
-    source.each_line(chomp: false) do |line|
-      excerpt = Excerpt.new(line, offset)
-      offset += line.size
-      content = excerpt.strip
-      if content.string.ends_with?('|')
-        results << stack.pop.to_rule
-        stack << RuleBlock.new(content, Excerpt.new("", excerpt.end))
-        next
-      end
-      top = stack.last
-      stack[-1] = top.copy_with(code: top.code + excerpt)
-    end
-
-    stack.each do |block|
-      results << block.to_rule
-    end
-
-    results
-  end
-
-  def parse(source : String)
-    results = rules_in(source)
-    signatures = Set(RuleSignature).new
-    if results.empty?
-      self.sync = true
-      protocol.rewrite(signatures)
-      return
-    end
-
-    error = false
-
-    results.each do |result|
-      if rule = result.rule
-        rule.signature(to: signatures)
-        protocol.update(for: @cell, newer: rule)
-      else
-        error = true
-        result.markers.each do |marker|
-          mark(marker)
-        end
-      end
-    end
-
-    self.sync = !error
-    unless error
-      protocol.rewrite(signatures)
-    end
-  end
-
-  # **Warning**: invalid before the first draw.
-  getter origin : Vector2 = 0.at(0)
-  # **Warning**: invalid before the first draw.
-  getter corner : Vector2 = 0.at(0)
-
-  def draw(target, states)
-    @origin = origin = @cell.mid + @cell.class.radius * 1.1
-    @editor_view.position = (origin + 15.at(15)).sfi
-
-    extent = @editor_view.size + SF.vector2f(30, 30)
-
-    @corner = origin + Vector2.new(extent)
-
-    sync_color = sync? ? SF::Color.new(0x81, 0xD4, 0xFA, 0x88) : SF::Color.new(0xEF, 0x9A, 0x9A, 0x88)
-    sync_color_opaque = SF::Color.new(sync_color.r, sync_color.g, sync_color.b)
-
-    #
-    # Draw line from origin of editor to center of cell.
-    #
-    va = SF::VertexArray.new(SF::Lines, 2)
-    va.append(SF::Vertex.new(@cell.mid.sfi, sync_color_opaque))
-    va.append(SF::Vertex.new(origin.sfi, sync_color_opaque))
-    va.draw(target, states)
-
-    #
-    # Draw little circles at start of line to really show
-    # which cell is selected.
-    #
-    start_circle = SF::CircleShape.new(radius: 2)
-    start_circle.fill_color = sync_color_opaque
-    start_circle.position = (@cell.mid - 2).sfi
-    start_circle.draw(target, states)
-
-    #
-    # Draw background rectangle.
-    #
-    bg_rect = SF::RectangleShape.new
-    bg_rect.fill_color = SF::Color.new(0x42, 0x42, 0x42, 0xbb)
-    bg_rect.position = (origin + 5.at(1)).sfi
-    bg_rect.outline_thickness = 1
-    bg_rect.outline_color = sync_color # SF::Color.new(0x42, 0x42, 0x42, 0xee)
-    bg_rect.size = extent - SF.vector2f(0, 2)
-    bg_rect.draw(target, states)
-
-    #
-    # Draw thick left bar which shows whether the code is
-    # synchronized with what's running.
-    #
-    bar = SF::RectangleShape.new
-    bar.fill_color = sync_color
-    bar.position = origin.sfi
-    bar.size = SF.vector2f(4, extent.y)
-    bar.draw(target, states)
-
-    #
-    # Underline every keyword rule. Keyword index and parameter
-    # indices are assumed to be on the same line.
-    #
-    # If out of sync (errors occured), the underlines are not
-    # drawn since the editor is probably in a bad state or they
-    # would be drawn incorrectly anyway.
-    #
-    rule_headers = [] of SF::RectangleShape
-    rule_header_bg = SF::Color.new(0x51, 0x51, 0x51)
-
-    protocol.each_keyword_rule do |kwrule|
-      next unless sync?
-
-      b = kwrule.header_start
-
-      b_pos = @editor_view.find_character_pos(b)
-
-      h_bg = SF::RectangleShape.new
-      h_bg.position = SF.vector2f(bg_rect.position.x, b_pos.y) + @editor_view.beam_margin
-      h_bg.size = SF.vector2f(bg_rect.size.x, @editor_view.font_size)
-      h_bg.fill_color = rule_header_bg
-
-      h_sep_top = SF::RectangleShape.new
-      h_sep_top.position = h_bg.position
-      h_sep_top.size = SF.vector2f(h_bg.size.x, 1)
-      h_sep_top.fill_color = SF::Color.new(0x61, 0x61, 0x61)
-
-      h_sep_bot = SF::RectangleShape.new
-      h_sep_bot.position = h_bg.position + SF.vector2f(0, h_bg.size.y)
-      h_sep_bot.size = SF.vector2f(h_bg.size.x, 1)
-      h_sep_bot.fill_color = SF::Color.new(0x61, 0x61, 0x61)
-
-      rule_headers << h_bg
-      rule_headers << h_sep_top
-      rule_headers << h_sep_bot
-    end
-
-    rule_headers.each &.draw(target, states)
-
-    @editor.draw(target, states)
-
-    #
-    # Draw markers
-    #
-    markers.each_value do |marker|
-      coords = @editor_view.find_character_pos(marker.offset)
-
-      # If cursor is below marker offset, we want this marker
-      # to be above.
-      m_line = state.bstate.index_to_line(marker.offset)
-      c_line = state.bstate.line
-      flip = c_line.ord > m_line.ord
-
-      offset = SF.vector2f(0, @editor_view.line_height)
-      coords += flip ? SF.vector2f(3, -3.5) : offset
-
-      # To enable variation while maintaining uniformity with
-      # the original color.
-      l, c, h = LCH.rgb2lch(marker.color.r, marker.color.g, marker.color.b)
-
-      bg_l = 70
-      fg_l = 40
-
-      mtext = SF::Text.new(marker.message, FONT, 11)
-
-      mbg_rect_position = coords + (flip ? SF.vector2f(-6, -@editor_view.line_height - 0.2) : SF.vector2f(-3, 4.5))
-      mbg_rect_size = SF.vector2f(
-        mtext.global_bounds.width + mtext.local_bounds.left + 10,
-        mtext.global_bounds.height + mtext.local_bounds.top + 4
-      )
-
-      #
-      # Draw shadow rect for the marker text.
-      #
-      mshadow_rect = SF::RectangleShape.new
-      mshadow_rect.position = mbg_rect_position + SF.vector2f(2, 2)
-      mshadow_rect.size = mbg_rect_size
-      mshadow_rect.fill_color = SF::Color.new(*LCH.lch2rgb(fg_l, c, h), 0x55)
-      mshadow_rect.draw(target, states)
-      @corner = @corner.max(Vector2.new(mshadow_rect.position + mshadow_rect.size))
-
-      #
-      # Draw the little triangle in the corner, pointing to the
-      # marker offset.
-      #
-      tri = SF::CircleShape.new(radius: 3, point_count: 3)
-      tri.fill_color = SF::Color.new(*LCH.lch2rgb(bg_l, c, h))
-      tri.position = coords
-      if flip
-        tri.position += SF.vector2f(0, 4)
-        tri.origin = SF.vector2f(3, 3)
-        tri.rotate(180.0)
-      end
-      tri.draw(target, states)
-
-      #
-      # Draw background rectangle for the marker text.
-      #
-      mbg_rect = SF::RectangleShape.new
-      mbg_rect.position = mbg_rect_position
-      mbg_rect.size = mbg_rect_size
-      mbg_rect.fill_color = SF::Color.new(*LCH.lch2rgb(bg_l, c, h))
-      mbg_rect.draw(target, states)
-
-      #
-      # Draw marker text.
-      #
-      mtext.fill_color = SF::Color.new(*LCH.lch2rgb(fg_l, c, h))
-      mtext.position = Vector2.new(mbg_rect.position + SF.vector2f(5, 2)).sfi
-      mtext.draw(target, states)
-    end
-  end
-end
+# # An excerpt with a beginning and an end. Keeps positional
+# # information in sync with the excerpt string.
+# #
+# # Note that in the excerpt range, the end point is excluded.
+# # That is, the excerpt range is [b; e)
+# record Excerpt, string : String, start : Int32 do
+#   # Returns the end index of this excerpt in the source string.
+#   def end : Int
+#     start + string.size
+#   end
+
+#   # Maps *index* in this excerpt to the corresponding index in
+#   # the source string.
+#   def map(index : Int) : Int
+#     start + index
+#   end
+
+#   # Removes whitespace from the left and right of this excerpt.
+#   # Adjusts positional information accordingly.
+#   def strip : Excerpt
+#     orig = string
+
+#     lstr = orig.lstrip
+#     rstr = lstr.rstrip
+
+#     Excerpt.new(
+#       string: rstr,
+#       start: start + (orig.size - lstr.size),
+#     )
+#   end
+
+#   # Concatenates this and *other* excerpts.
+#   #
+#   # *other* excerpt must start immediately after this excerpt.
+#   # That is, its beginning must be the same as this excerpt's
+#   # end. Otherwise, this method will raise.
+#   def +(other : Excerpt)
+#     unless other.start == self.end
+#       raise ArgumentError.new("'+': right bounded excerpt must follow the left bounded excerpt")
+#     end
+
+#     Excerpt.new(string + other.string, start)
+#   end
+# end
+
+# # Represents the result of parsing a block. It's optionally
+# # a rule, plus zero or more markers.
+# record ParseResult, rule : Rule? = nil, markers = [] of Marker do
+#   # A shorthand for an error result with no rule and a single
+#   # hint marker.
+#   def self.hint(offset : Int, message : String)
+#     new(markers: [Marker.hint(offset, message)])
+#   end
+
+#   # A shorthand for a success result with `KeywordRule` rule
+#   # and no markers.
+#   def self.keyword(keyword : Excerpt, params : Array(Excerpt), lua : Excerpt)
+#     new(rule: KeywordRule.new(keyword, params, lua))
+#   end
+
+#   # A shorthand for a success result with `HeartbeatRule` rule
+#   # and no markers.
+#   def self.heartbeat(keyword : Excerpt, lua : Excerpt, period : Time::Span? = nil)
+#     new(rule: HeartbeatRule.new(keyword, lua, period))
+#   end
+# end
+
+# # Blocks are intermediates between raw source and `Rule`s.
+# abstract struct Block
+#   # Tries to convert this block into the corresponding `Rule`.
+#   abstract def to_rule : ParseResult
+# end
+
+# # Birth blocks are implicit blocks that consist of code only,
+# # and are later converted into `BirthRule`s.
+# #
+# # ```synapse
+# # -- The following Lua code will be stored under the birth
+# # -- block/birth rule.
+# # x = 123
+# # y = 456
+# # z = "hello world"
+# #
+# # heartbeat |
+# #   -- And this is going to be stored under a rule block /
+# #   -- keyword rule (heartbeat)
+# #   x = x + 1
+# # ```
+# record BirthBlock < Block, code : Excerpt do
+#   def to_rule : ParseResult
+#     ParseResult.new rule: BirthRule.new(code)
+#   end
+# end
+
+# record RuleBlock < Block, header : Excerpt, code : Excerpt do
+#   def to_rule : ParseResult
+#     scanner = StringScanner.new(header.string)
+
+#     #
+#     # Parse message keyword.
+#     #
+#     # <messageKeyword> ::= <alpha> <alnum>*
+#     #
+#     start = header.map(scanner.offset)
+#     unless keyword = scanner.scan(/(?:[A-Za-z]\w*|\*)/)
+#       return ParseResult.hint(start, "I want keyword (aka message name) here!")
+#     end
+
+#     heartbeat = keyword == "heartbeat"
+#     keyword = Excerpt.new(keyword, start)
+
+#     if heartbeat
+#       #
+#       # Parse heartbeat. Heartbeat does not take parameters.
+#       # It's either a period or the pipe.
+#       #
+#       # <heartbeat> ::= "heartbeat" WS (<period> | "|")
+#       #
+#       start = header.map(scanner.offset)
+
+#       unless scanner.scan(/[ \t]+/)
+#         return ParseResult.hint(start, "I want whitespace here!")
+#       end
+
+#       start = header.map(scanner.offset)
+
+#       if number = scanner.scan(/[1-9][0-9]*/)
+#         start = header.map(scanner.offset)
+
+#         unless unit = scanner.scan(/m?s/)
+#           return ParseResult.hint(start, "I want a time unit here, either 'ms' (for milliseconds) or 's' (for seconds)")
+#         end
+
+#         case unit
+#         when "ms"
+#           period = number.to_i.milliseconds
+#         when "s"
+#           period = number.to_i.seconds
+#         end
+#       end
+
+#       result = ParseResult.heartbeat(keyword, code, period)
+#     else
+#       #
+#       # Parse message parameters. Parameters follow the keyword,
+#       # therefore, a leading whitespace is always expected.
+#       #
+#       # <params> ::= (WS <param>)*
+#       # <param> ::= <alpha> <alnum>*
+#       #
+#       start = header.map(scanner.offset)
+#       params = [] of Excerpt
+#       while param = scanner.scan(/[ \t]+(?:[A-Za-z]\w*)/)
+#         params << Excerpt.new(param, start).strip
+#         start = header.map(scanner.offset)
+#       end
+
+#       result = ParseResult.keyword(keyword, params, code)
+#     end
+
+#     #
+#     # Make sure that the pipe character itself is in the
+#     # right place.
+#     #
+#     unless scanner.scan(/[ \t]*\|/)
+#       return ParseResult.hint(header.map(scanner.offset), "I want space followed by pipe '|' here!")
+#     end
+
+#     result
+#   end
+# end
+
+# record Marker, color : SF::Color, offset : Int32, tally : Hash(String, Int32) do
+#   def initialize(color, offset, message : String)
+#     hash = Hash(String, Int32).new(0)
+
+#     initialize(color, offset, message.lines.tally_by(hash, &.itself))
+#   end
+
+#   def self.hint(offset, message)
+#     hint_color = SF::Color.new(0xFF, 0xCA, 0x28)
+#     new(hint_color, offset, message)
+#   end
+
+#   def message
+#     String.build do |io|
+#       tally.each do |line, count|
+#         io << line
+#         unless count == 1
+#           io << "(x" << count << ")"
+#         end
+#       end
+#     end
+#   end
+
+#   def stack(other : Marker)
+#     tally.merge!(other.tally) do |_, l, r|
+#       l + r
+#     end
+
+#     self
+#   end
+# end
+
+# alias MarkerCollection = Hash(Int32, Marker)
+
+# class ProtocolEditorState
+#   getter id : UUID             # TODO: remove
+#   property protocol : Protocol # TODO: remove
+#   property? sync : Bool        # TODO: remove
+#   getter bstate                # TODO: remove
+#   getter markers               # TODO: remove
+
+#   def initialize(@protocol, @bstate = BufferEditorState.new, @markers = MarkerCollection.new, @sync = true)
+#     @id = UUID.random
+#   end
+
+#   delegate :cursor, :cursor=, to: @bstate   # TODO: remove
+#   delegate :buffer, :buffer=, to: @bstate   # TODO: remove
+#   delegate :markers, :markers=, to: @bstate # TODO: remove
+# end
+
+# class ProtocolEditor
+#   include SF::Drawable
+
+#   getter state # TODO: remove
+
+#   def initialize(@cell : Cell, @state : ProtocolEditorState)
+#     @editor_view = BufferEditorView.new
+#     @editor_view.active = true
+#     @editor = BufferEditor.new(@state.bstate, @editor_view)
+#   end
+
+#   def initialize(cell : Cell, protocol : Protocol)
+#     initialize(cell, ProtocolEditorState.new(protocol))
+#   end
+
+#   def initialize(cell : Cell, other : ProtocolEditor)
+#     initialize(cell, other.state)
+#   end
+
+#   # TODO: remove
+#   private delegate :protocol, :protocol=, to: @state
+#   # TODO: remove
+#   private delegate :markers, :markers=, to: @state
+#   # TODO: remove
+#   private delegate :sync?, :sync=, to: @state
+
+#   # Editor needs to be refreshed when protocoleditor is focused
+#   # because other cells that have the same protocol (copies) may
+#   # have altered it.
+#   def refresh
+#     @editor.refresh
+#   end
+
+#   def update
+#     before = @state.bstate.capture
+#     yield
+#     after = @state.bstate.capture
+
+#     unless before == after
+#       markers.clear
+
+#       parse(after.string)
+#     end
+#   end
+
+#   def unsync(err : ErrResult)
+#     # Signal that what's currently running is out of sync from
+#     # what's being shown.
+#     self.sync = false
+
+#     mark(SF::Color::Red, err.index, err.error.message || "lua error")
+#   end
+
+#   def mark(color : SF::Color, offset : Int32, message : String)
+#     mark Marker.new(color, offset, message)
+#   end
+
+#   def mark(marker : Marker)
+#     # FIXME: this is MarkerCollection business!
+#     if prev = markers[marker.offset]?
+#       marker = prev.stack(marker)
+#     end
+
+#     markers[marker.offset] = marker
+#   end
+
+#   def editor_handle(buf, event)
+#   end
+
+#   def handle(event)
+#     update { @editor.handle(event) }
+#   end
+
+#   def rules_in(source : String)
+#     stack = [BirthBlock.new(Excerpt.new("", 0))] of Block
+#     offset = 0
+#     results = [] of ParseResult
+
+#     source.each_line(chomp: false) do |line|
+#       excerpt = Excerpt.new(line, offset)
+#       offset += line.size
+#       content = excerpt.strip
+#       if content.string.ends_with?('|')
+#         results << stack.pop.to_rule
+#         stack << RuleBlock.new(content, Excerpt.new("", excerpt.end))
+#         next
+#       end
+#       top = stack.last
+#       stack[-1] = top.copy_with(code: top.code + excerpt)
+#     end
+
+#     stack.each do |block|
+#       results << block.to_rule
+#     end
+
+#     results
+#   end
+
+#   def parse(source : String)
+#     results = rules_in(source)
+#     signatures = Set(RuleSignature).new
+#     if results.empty?
+#       self.sync = true
+#       protocol.rewrite(signatures)
+#       return
+#     end
+
+#     error = false
+
+#     results.each do |result|
+#       if rule = result.rule
+#         rule.signature(to: signatures)
+#         protocol.update(for: @cell, newer: rule)
+#       else
+#         error = true
+#         result.markers.each do |marker|
+#           mark(marker)
+#         end
+#       end
+#     end
+
+#     self.sync = !error
+#     unless error
+#       protocol.rewrite(signatures)
+#     end
+#   end
+
+#   # **Warning**: invalid before the first draw.
+#   getter origin : Vector2 = 0.at(0)
+#   # **Warning**: invalid before the first draw.
+#   getter corner : Vector2 = 0.at(0)
+
+#   def draw(target, states)
+#     @origin = origin = @cell.mid + @cell.class.radius * 1.1
+#     @editor_view.position = (origin + 15.at(15)).sfi
+
+#     extent = @editor_view.size + SF.vector2f(30, 30)
+
+#     @corner = origin + Vector2.new(extent)
+
+#     sync_color = sync? ? SF::Color.new(0x81, 0xD4, 0xFA, 0x88) : SF::Color.new(0xEF, 0x9A, 0x9A, 0x88)
+#     sync_color_opaque = SF::Color.new(sync_color.r, sync_color.g, sync_color.b)
+
+#     #
+#     # Draw line from origin of editor to center of cell.
+#     #
+#     va = SF::VertexArray.new(SF::Lines, 2)
+#     va.append(SF::Vertex.new(@cell.mid.sfi, sync_color_opaque))
+#     va.append(SF::Vertex.new(origin.sfi, sync_color_opaque))
+#     va.draw(target, states)
+
+#     #
+#     # Draw little circles at start of line to really show
+#     # which cell is selected.
+#     #
+#     start_circle = SF::CircleShape.new(radius: 2)
+#     start_circle.fill_color = sync_color_opaque
+#     start_circle.position = (@cell.mid - 2).sfi
+#     start_circle.draw(target, states)
+
+#     #
+#     # Draw background rectangle.
+#     #
+#     bg_rect = SF::RectangleShape.new
+#     bg_rect.fill_color = SF::Color.new(0x42, 0x42, 0x42, 0xbb)
+#     bg_rect.position = (origin + 5.at(1)).sfi
+#     bg_rect.outline_thickness = 1
+#     bg_rect.outline_color = sync_color # SF::Color.new(0x42, 0x42, 0x42, 0xee)
+#     bg_rect.size = extent - SF.vector2f(0, 2)
+#     bg_rect.draw(target, states)
+
+#     #
+#     # Draw thick left bar which shows whether the code is
+#     # synchronized with what's running.
+#     #
+#     bar = SF::RectangleShape.new
+#     bar.fill_color = sync_color
+#     bar.position = origin.sfi
+#     bar.size = SF.vector2f(4, extent.y)
+#     bar.draw(target, states)
+
+#     #
+#     # Underline every keyword rule. Keyword index and parameter
+#     # indices are assumed to be on the same line.
+#     #
+#     # If out of sync (errors occured), the underlines are not
+#     # drawn since the editor is probably in a bad state or they
+#     # would be drawn incorrectly anyway.
+#     #
+#     rule_headers = [] of SF::RectangleShape
+#     rule_header_bg = SF::Color.new(0x51, 0x51, 0x51)
+
+#     protocol.each_keyword_rule do |kwrule|
+#       next unless sync?
+
+#       b = kwrule.header_start
+
+#       b_pos = @editor_view.find_character_pos(b)
+
+#       h_bg = SF::RectangleShape.new
+#       h_bg.position = SF.vector2f(bg_rect.position.x, b_pos.y) + @editor_view.beam_margin
+#       h_bg.size = SF.vector2f(bg_rect.size.x, @editor_view.font_size)
+#       h_bg.fill_color = rule_header_bg
+
+#       h_sep_top = SF::RectangleShape.new
+#       h_sep_top.position = h_bg.position
+#       h_sep_top.size = SF.vector2f(h_bg.size.x, 1)
+#       h_sep_top.fill_color = SF::Color.new(0x61, 0x61, 0x61)
+
+#       h_sep_bot = SF::RectangleShape.new
+#       h_sep_bot.position = h_bg.position + SF.vector2f(0, h_bg.size.y)
+#       h_sep_bot.size = SF.vector2f(h_bg.size.x, 1)
+#       h_sep_bot.fill_color = SF::Color.new(0x61, 0x61, 0x61)
+
+#       rule_headers << h_bg
+#       rule_headers << h_sep_top
+#       rule_headers << h_sep_bot
+#     end
+
+#     rule_headers.each &.draw(target, states)
+
+#     @editor.draw(target, states)
+
+#     #
+#     # Draw markers
+#     #
+#     markers.each_value do |marker|
+#       coords = @editor_view.find_character_pos(marker.offset)
+
+#       # If cursor is below marker offset, we want this marker
+#       # to be above.
+#       m_line = state.bstate.index_to_line(marker.offset)
+#       c_line = state.bstate.line
+#       flip = c_line.ord > m_line.ord
+
+#       offset = SF.vector2f(0, @editor_view.line_height)
+#       coords += flip ? SF.vector2f(3, -3.5) : offset
+
+#       # To enable variation while maintaining uniformity with
+#       # the original color.
+#       l, c, h = LCH.rgb2lch(marker.color.r, marker.color.g, marker.color.b)
+
+#       bg_l = 70
+#       fg_l = 40
+
+#       mtext = SF::Text.new(marker.message, FONT, 11)
+
+#       mbg_rect_position = coords + (flip ? SF.vector2f(-6, -@editor_view.line_height - 0.2) : SF.vector2f(-3, 4.5))
+#       mbg_rect_size = SF.vector2f(
+#         mtext.global_bounds.width + mtext.local_bounds.left + 10,
+#         mtext.global_bounds.height + mtext.local_bounds.top + 4
+#       )
+
+#       #
+#       # Draw shadow rect for the marker text.
+#       #
+#       mshadow_rect = SF::RectangleShape.new
+#       mshadow_rect.position = mbg_rect_position + SF.vector2f(2, 2)
+#       mshadow_rect.size = mbg_rect_size
+#       mshadow_rect.fill_color = SF::Color.new(*LCH.lch2rgb(fg_l, c, h), 0x55)
+#       mshadow_rect.draw(target, states)
+#       @corner = @corner.max(Vector2.new(mshadow_rect.position + mshadow_rect.size))
+
+#       #
+#       # Draw the little triangle in the corner, pointing to the
+#       # marker offset.
+#       #
+#       tri = SF::CircleShape.new(radius: 3, point_count: 3)
+#       tri.fill_color = SF::Color.new(*LCH.lch2rgb(bg_l, c, h))
+#       tri.position = coords
+#       if flip
+#         tri.position += SF.vector2f(0, 4)
+#         tri.origin = SF.vector2f(3, 3)
+#         tri.rotate(180.0)
+#       end
+#       tri.draw(target, states)
+
+#       #
+#       # Draw background rectangle for the marker text.
+#       #
+#       mbg_rect = SF::RectangleShape.new
+#       mbg_rect.position = mbg_rect_position
+#       mbg_rect.size = mbg_rect_size
+#       mbg_rect.fill_color = SF::Color.new(*LCH.lch2rgb(bg_l, c, h))
+#       mbg_rect.draw(target, states)
+
+#       #
+#       # Draw marker text.
+#       #
+#       mtext.fill_color = SF::Color.new(*LCH.lch2rgb(fg_l, c, h))
+#       mtext.position = Vector2.new(mbg_rect.position + SF.vector2f(5, 2)).sfi
+#       mtext.draw(target, states)
+#     end
+#   end
+# end
 
 alias Memorable = Bool | Float64 | Lua::Table | String | Nil
+
+# Raised when a receiver cell wants to commit suicide.
+class CommitSuicide < Exception
+end
 
 class Cell < RoundEntity
   include Inspectable
@@ -965,26 +970,34 @@ class Cell < RoundEntity
     InstanceMemory.new(self)
   end
 
+  property? sync = true
+
   @wires = Set(Wire).new
 
   def initialize
     super(self.class.color, lifespan: nil)
 
-    @protocol = Protocol.new
+    @protocol = ProtocolCollection.new
 
     @relatives = [] of Cell
 
-    @editor = uninitialized ProtocolEditor
-    @editor = ProtocolEditor.new(self, @protocol)
+    @editor = CellEditor.new
+    @editor.append(@protocol)
 
     @relatives << self
   end
 
-  def initialize(color : SF::Color, @protocol : Protocol, editor : ProtocolEditor, @relatives : Array(Cell))
+  def initialize(color : SF::Color, @protocol : ProtocolCollection, editor : CellEditor, @relatives : Array(Cell))
     super(color, lifespan: nil)
 
-    @editor = uninitialized ProtocolEditor
-    @editor = ProtocolEditor.new(self, editor)
+    @editor = CellEditor.new
+    @editor.append(@protocol)
+  end
+
+  def point_in_editor?(point : Vector2)
+    origin = (mid + 32.at(32))
+    corner = origin + Vector2.new(@editor.size)
+    origin.x <= point.x <= corner.x && origin.y <= point.y <= corner.y
   end
 
   def copy
@@ -1053,7 +1066,7 @@ class Cell < RoundEntity
     dy = 0
 
     origin = @drawable.position - SF.vector2f(Cell.radius, Cell.radius)
-    corner = @editor.corner.sf + SF.vector2f(Cell.radius, Cell.radius)
+    corner = editor_position + @editor.size + SF.vector2f(Cell.radius, Cell.radius)
     extent = corner - origin
 
     if view.size.x < extent.x || view.size.y < extent.y
@@ -1136,7 +1149,7 @@ class Cell < RoundEntity
 
   def summon(*, in tank : Tank)
     super
-    @protocol.born(self)
+    @protocol.born(self, in: tank)
     nil
   end
 
@@ -1162,20 +1175,29 @@ class Cell < RoundEntity
     # declaration starts.
     tank.inspect(self) if tank.inspecting?(nil)
 
-    @editor.unsync(err)
+    # Signal that what's currently running is out of sync from
+    # what's being shown.
+    self.sync = false
   end
 
   def handle(event)
     @editor.handle(event)
   end
 
+  def editor_position
+    (mid + 32.at(32)).sf
+  end
+
   def start_inspection?(in tank : Tank)
-    @editor.refresh
+    @editor = CellEditor.new
+    @editor.append(@protocol)
 
     true
   end
 
   def stop_inspection?(in tank : Tank)
+    @protocol = @editor.to_protocol_collection
+
     true
   end
 
@@ -1188,17 +1210,19 @@ class Cell < RoundEntity
   # Prefer using `Tank` to calling this method yourself because
   # sync of systoles/dyastoles between relatives is unsupported.
   def systole(in tank : Tank)
-    @protocol.systole(self, tank)
+    @protocol.systole(self, in: tank)
   rescue CommitSuicide
     suicide(in: tank)
   end
 
   # :ditto:
   def dyastole(in tank : Tank)
-    @protocol.dyastole(self, tank)
+    @protocol.dyastole(self, in: tank)
   rescue CommitSuicide
     suicide(in: tank)
   end
+
+  @__texture = SF::RenderTexture.new(600, 400)
 
   def draw(tank : Tank, target)
     super
@@ -1217,7 +1241,45 @@ class Cell < RoundEntity
     target.draw(halo)
 
     if role.main?
-      target.draw(@editor)
+      sync_color = sync? ? SF::Color.new(0x81, 0xD4, 0xFA, 0x88) : SF::Color.new(0xEF, 0x9A, 0x9A, 0x88)
+      sync_color_opaque = SF::Color.new(sync_color.r, sync_color.g, sync_color.b)
+
+      #
+      # Draw line from origin of editor to center of cell.
+      #
+      va = SF::VertexArray.new(SF::Lines, 2)
+      va.append(SF::Vertex.new(mid.sfi, sync_color_opaque))
+      va.append(SF::Vertex.new(editor_position, sync_color_opaque))
+      target.draw(va)
+
+      #
+      # Draw little circles at start of line to really show
+      # which cell is selected.
+      #
+      start_circle = SF::CircleShape.new(radius: 2)
+      start_circle.fill_color = sync_color_opaque
+      start_circle.position = (mid - 2).sfi
+      target.draw(start_circle)
+
+      #
+      # Draw background rectangle.
+      #
+      bg_rect = SF::RectangleShape.new
+      bg_rect.fill_color = SF::Color.new(0x42, 0x42, 0x42, 0xbb)
+      bg_rect.position = editor_position - SF.vector2(1, 1)
+      bg_rect.outline_thickness = 2
+      bg_rect.outline_color = sync_color # SF::Color.new(0x42, 0x42, 0x42, 0xee)
+      bg_rect.size = @editor.size + SF.vector2f(2, 2)
+      target.draw(bg_rect)
+
+      @__texture.clear(SF::Color.new(0x25, 0x25, 0x25))
+      @__texture.draw(@editor)
+      @__texture.display
+
+      sprite = SF::Sprite.new(@__texture.texture)
+      sprite.position = editor_position
+
+      target.draw(sprite)
     end
   end
 end
@@ -1789,6 +1851,15 @@ class Mode::Normal < Mode
   def map(app, event : SF::Event::MouseButtonPressed)
     coords = app.coords(event)
 
+    # If a cell is being inspected and cursor is in bounds of
+    # its editor, redirect.
+    if (cell = app.tank.@inspecting.as?(Cell)) && cell.point_in_editor?(coords)
+      event.x = coords.x.to_i - cell.editor_position.x.to_i # FIXME: editor.position is not updating automatically
+      event.y = coords.y.to_i - cell.editor_position.y.to_i
+      cell.handle(event)
+      return self
+    end
+
     if (cc = @clickclock) && cc.elapsed_time.as_milliseconds < 300 && event.button == @prev_button
       @clicks = 2
     else
@@ -1833,6 +1904,16 @@ class Mode::Normal < Mode
   end
 
   def map(app, event : SF::Event::MouseButtonReleased)
+    coords = app.coords(event)
+    # If a cell is being inspected and cursor is in bounds of
+    # its editor, redirect.
+    if (cell = app.tank.@inspecting.as?(Cell)) && cell.point_in_editor?(coords)
+      event.x = coords.x.to_i - cell.editor_position.x.to_i # FIXME: editor.position is not updating automatically
+      event.y = coords.y.to_i - cell.editor_position.y.to_i
+      cell.handle(event)
+      return self
+    end
+
     if @elevated.nil? && (@mouse_in_tank.in?(app.console) || app.console.elevated?)
       app.console.handle(event)
       return self
@@ -1846,6 +1927,16 @@ class Mode::Normal < Mode
 
   def map(app, event : SF::Event::MouseMoved)
     super
+    coords = app.coords(event)
+
+    # If a cell is being inspected and cursor is in bounds of
+    # its editor, redirect.
+    if (cell = app.tank.@inspecting.as?(Cell)) && cell.point_in_editor?(coords)
+      event.x = coords.x.to_i - cell.editor_position.x.to_i # FIXME: editor.position is not updating automatically
+      event.y = coords.y.to_i - cell.editor_position.y.to_i
+      cell.handle(event)
+      return self
+    end
 
     if @elevated.nil? && (@mouse_in_tank.in?(app.console) || app.console.elevated?)
       app.console.handle(event)

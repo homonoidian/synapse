@@ -10,11 +10,15 @@ class KeywordRuleEditorState < RuleEditorState
     2 # Rule header + rule code
   end
 
+  def to_rule(signature : RuleSignature, code : String) : Rule
+    KeywordRule.new(signature, code)
+  end
+
   def to_rule : Rule
     header = @states[0].as(RuleHeaderState)
     code = @states[1]?.as?(RuleCodeRowState).try &.string || ""
 
-    SignatureRule.new(header.to_rule_signature, code)
+    to_rule(header.to_rule_signature, code)
   end
 
   def new_substate_for(index : Int)

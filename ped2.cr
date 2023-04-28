@@ -50,17 +50,17 @@ require "./heartbeat_rule_editor"
 require "./protocol_name_editor"
 require "./protocol_editor"
 
-FONT        = SF::Font.from_memory({{read_file("./fonts/code/scientifica.otb")}}.to_slice)
-FONT_BOLD   = SF::Font.from_memory({{read_file("./fonts/code/scientificaBold.otb")}}.to_slice)
-FONT_ITALIC = SF::Font.from_memory({{read_file("./fonts/code/scientificaItalic.otb")}}.to_slice)
+# FONT        = SF::Font.from_memory({{read_file("./fonts/code/scientifica.otb")}}.to_slice)
+# FONT_BOLD   = SF::Font.from_memory({{read_file("./fonts/code/scientificaBold.otb")}}.to_slice)
+# FONT_ITALIC = SF::Font.from_memory({{read_file("./fonts/code/scientificaItalic.otb")}}.to_slice)
 
-FONT.get_texture(11).smooth = false
-FONT_BOLD.get_texture(11).smooth = false
-FONT_ITALIC.get_texture(11).smooth = false
+# FONT.get_texture(11).smooth = false
+# FONT_BOLD.get_texture(11).smooth = false
+# FONT_ITALIC.get_texture(11).smooth = false
 
-FONT_UI        = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Regular.ttf")}}.to_slice)
-FONT_UI_MEDIUM = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Medium.ttf")}}.to_slice)
-FONT_UI_BOLD   = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Bold.ttf")}}.to_slice)
+# FONT_UI        = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Regular.ttf")}}.to_slice)
+# FONT_UI_MEDIUM = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Medium.ttf")}}.to_slice)
+# FONT_UI_BOLD   = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Bold.ttf")}}.to_slice)
 
 # ----------------------------------------------------------
 
@@ -401,6 +401,10 @@ class CellEditor
     @dragging.each { |subject, event| on_motion(subject, event) }
   end
 
+  def size
+    SF.vector2f(600, 400)
+  end
+
   def append(entity : CellEditorEntity)
     @entities << entity
   end
@@ -681,7 +685,13 @@ abstract class RuleSignature
 end
 
 class HeartbeatRuleSignature < RuleSignature
+  getter? period : Time::Span?
+
   def initialize(@period : Time::Span?)
+  end
+
+  def matches?(message : Message)
+    false
   end
 
   def append_rule(code : String, into editor : CellEditor)
@@ -705,6 +715,10 @@ end
 
 class KeywordRuleSignature < RuleSignature
   def initialize(@keyword : String, @params : Array(String))
+  end
+
+  def matches?(message : Message)
+    @keyword == message.keyword && @params.size == message.args.size
   end
 
   def append_rule(code : String, into editor : CellEditor)
@@ -731,9 +745,40 @@ end
 abstract class Rule
   def initialize(@code : String)
   end
+
+  def matches?(message : Message)
+    false
+  end
 end
 
 class BirthRule < Rule
+  def express(receiver : Cell)
+    result(receiver)
+
+    receiver.each_relative do |cell|
+      cell.interpret result(cell)
+    end
+  end
+
+  def result(receiver : Cell) : ExpressionResult
+    stack = Lua::Stack.new
+
+    res = ExpressionContext.new(receiver)
+    res.fill(stack)
+
+    begin
+      stack.run(@code, "birth")
+
+      OkResult.new
+    rescue e : Lua::LuaError
+      ErrResult.new(e, self)
+    rescue e : ArgumentError
+      ErrResult.new(e, self)
+    ensure
+      stack.close
+    end
+  end
+
   def append(into editor : CellEditor)
     state = BirthRuleEditorState.new
     state.code?.try &.insert(@code)
@@ -744,9 +789,13 @@ class BirthRule < Rule
   end
 end
 
-class SignatureRule < Rule
+abstract class SignatureRule < Rule
   def initialize(@signature : RuleSignature, code)
     super(code)
+  end
+
+  def matches?(message : Message)
+    @signature.matches?(message)
   end
 
   def append(into editor : CellEditor)
@@ -754,9 +803,152 @@ class SignatureRule < Rule
   end
 end
 
+abstract struct ExpressionResult
+end
+
+record OkResult < ExpressionResult
+record ErrResult < ExpressionResult, error : Lua::LuaError | ArgumentError, rule : Rule do
+  def index
+    rule.index
+  end
+end
+
+module ExpressibleFromVesicle
+  abstract def express(receiver : Cell, vesicle : Vesicle)
+  abstract def matches?(vesicle : Vesicle) : Bool
+end
+
+class KeywordRule < SignatureRule
+  include ExpressibleFromVesicle
+
+  def matches?(vesicle : Vesicle) : Bool
+    @signature.matches?(vesicle.message)
+  end
+
+  def result(receiver : Cell, message : Message, attack = 0.0) : ExpressionResult
+    stack = Lua::Stack.new
+
+    ctx = MessageExpressionContext.new(receiver, message, attack)
+    ctx.fill(stack)
+
+    @signature.as(KeywordRuleSignature).@params.zip(message.args) do |param, arg|
+      stack.set_global(param, arg)
+    end
+
+    begin
+      stack.run(@code, @signature.as(KeywordRuleSignature).@keyword)
+      result = OkResult.new
+    rescue e : Lua::LuaError
+      result = ErrResult.new(e, self)
+    rescue e : ArgumentError
+      result = ErrResult.new(e, self)
+    ensure
+      stack.close
+    end
+  end
+
+  def express(receiver : Cell, vesicle : Vesicle)
+    # Attack is a heading pointing towards the vesicle.
+    delta = (vesicle.mid - receiver.mid)
+    attack = Math.atan2(-delta.y, delta.x)
+    result = result(receiver, vesicle.message, attack)
+    receiver.interpret(result)
+  end
+end
+
+class HeartbeatRule < SignatureRule
+  def initialize(signature, code)
+    super
+
+    @clock = SF::Clock.new
+  end
+
+  # Returns the amount of *pending* lapses for this heartbeat
+  # rule. Caps to *cap*.
+  def lapses(period : Time::Span, cap = 4)
+    delta = @clock.elapsed_time.as_milliseconds - period.total_milliseconds
+
+    return unless delta >= 0
+
+    # We might have missed some...
+    lapses = (delta / period.total_milliseconds).trunc + 1
+
+    Math.min(cap, lapses.to_i)
+  end
+
+  # Systole is the "body" of a cell's heartbeat: at systole,
+  # heartbeat rules are triggered.
+  def systole(for receiver : Cell)
+    # If heartbeat message was decided corrupt, then it shall
+    # not be run.
+    return if @corrupt
+
+    if period = @signature.as(HeartbeatRuleSignature).period?
+      return unless count = lapses(period)
+    else
+      count = 1
+    end
+
+    result = uninitialized ExpressionResult
+
+    # Count is at all times at least = 1, therefore, result
+    # will be initialized.
+    count.times do
+      break if @corrupt
+
+      stack = Lua::Stack.new
+
+      # TODO: heartbeatresponsecontext, mainly to change period dynamically
+      res = ExpressionContext.new(receiver)
+      res.fill(stack)
+
+      begin
+        stack.run(@code, "heartbeat:#{period}")
+        result = OkResult.new
+      rescue e : Lua::LuaError
+        result = ErrResult.new(e, self)
+      rescue e : ArgumentError
+        result = ErrResult.new(e, self)
+      ensure
+        stack.close
+      end
+
+      @corrupt = result.is_a?(ErrResult)
+    end
+
+    result
+  end
+
+  # Dyastole resets heartbeat rules.
+  def dyastole(for receiver : Cell)
+    return unless period = @signature.as(HeartbeatRuleSignature).period?
+    return unless lapses(period)
+
+    @clock.restart
+  end
+end
+
 class Protocol
   def initialize(@uid : UUID, @name : String?)
     @rules = [] of Rule
+  end
+
+  def query(vesicle : Vesicle)
+    @rules
+      .select(ExpressibleFromVesicle)
+      .select! &.matches?(vesicle)
+  end
+
+  def each_heartbeat
+    @rules.each do |rule|
+      yield rule if rule.is_a?(HeartbeatRule)
+    end
+  end
+
+  def each_birth_rule
+    @rules.each do |rule|
+      yield rule if rule.is_a?(BirthRule)
+    end
   end
 
   def append(rule : Rule)
@@ -790,6 +982,55 @@ end
 class ProtocolCollection
   def initialize
     @protocols = {} of UUID => Protocol
+  end
+
+  def each_protocol
+    @protocols.each_value do |protocol|
+      yield protocol
+    end
+  end
+
+  def express(receiver : Cell, vesicle : Vesicle)
+    each_protocol do |protocol|
+      rules = protocol.query(vesicle)
+      rules.each &.express(receiver, vesicle)
+    end
+  end
+
+  def born(receiver : Cell, in tank : Tank)
+    each_protocol do |protocol|
+      protocol.each_birth_rule do |br|
+        result = br.express(receiver)
+        next unless result.is_a?(ErrResult)
+
+        receiver.fail(result, in: tank)
+      end
+    end
+  end
+
+  def systole(receiver : Cell, in tank : Tank)
+    each_protocol do |protocol|
+      protocol.each_heartbeat do |hb|
+        result = hb.systole(for: receiver)
+        next unless result.is_a?(ErrResult)
+
+        receiver.fail(result, in: tank)
+      end
+    end
+  end
+
+  def dyastole(receiver : Cell, in tank : Tank)
+    each_protocol do |protocol|
+      protocol.each_heartbeat do |hb|
+        result = hb.dyastole(for: receiver)
+        next unless result.is_a?(ErrResult)
+
+        receiver.fail(result, in: tank)
+      end
+    end
+  end
+
+  def on_memory_changed(receiver : Cell)
   end
 
   def summon(id : UUID, name : String?)
@@ -899,37 +1140,37 @@ end
 # [ ] Replace the current Protocol/Rule/ProtocolEditor system
 #     with this new one.
 
-window = SF::RenderWindow.new(SF::VideoMode.new(800, 600), title: "App", settings: SF::ContextSettings.new(depth: 24, antialiasing: 8))
-window.framerate_limit = 60
+# window = SF::RenderWindow.new(SF::VideoMode.new(800, 600), title: "App", settings: SF::ContextSettings.new(depth: 24, antialiasing: 8))
+# window.framerate_limit = 60
 
-protocols = ProtocolCollection.new
-foo = protocols.summon(UUID.random, "Greeter")
-foo.append(SignatureRule.new(KeywordRuleSignature.new("greet", ["name", "age"]), "print(name)"))
+# protocols = ProtocolCollection.new
+# foo = protocols.summon(UUID.random, "Greeter")
+# foo.append(SignatureRule.new(KeywordRuleSignature.new("greet", ["name", "age"]), "print(name)"))
 
-editor = CellEditor.new
-editor.append(protocols)
+# editor = CellEditor.new
+# editor.append(protocols)
 
-texture = SF::RenderTexture.new(600, 400)
+# texture = SF::RenderTexture.new(600, 400)
 
-while window.open?
-  while event = window.poll_event
-    case event
-    when SF::Event::Closed then window.close
-    when SF::Event::KeyPressed
-      if event.code.escape?
-        coll = editor.to_protocol_collection
-        editor = CellEditor.new
-        editor.append(coll)
-      end
-    end
-    editor.handle(event)
-  end
+# while window.open?
+#   while event = window.poll_event
+#     case event
+#     when SF::Event::Closed then window.close
+#     when SF::Event::KeyPressed
+#       if event.code.escape?
+#         coll = editor.to_protocol_collection
+#         editor = CellEditor.new
+#         editor.append(coll)
+#       end
+#     end
+#     editor.handle(event)
+#   end
 
-  texture.clear(SF::Color.new(0x21, 0x21, 0x21))
-  texture.draw(editor)
-  texture.display
+#   texture.clear(SF::Color.new(0x21, 0x21, 0x21))
+#   texture.draw(editor)
+#   texture.display
 
-  window.clear(SF::Color.new(0xff, 0xff, 0xff))
-  window.draw(SF::Sprite.new texture.texture)
-  window.display
-end
+#   window.clear(SF::Color.new(0xff, 0xff, 0xff))
+#   window.draw(SF::Sprite.new texture.texture)
+#   window.display
+# end
