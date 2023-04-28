@@ -44,6 +44,12 @@ class ProtocolEditorState < InputFieldRowState
     1
   end
 
+  def protocol_from(collection : ProtocolCollection)
+    name = @states[0].as(ProtocolNameEditorState).string
+
+    collection.summon(@id, name)
+  end
+
   def new_substate_for(index : Int)
     ProtocolNameEditorState.new
   end
@@ -184,4 +190,9 @@ class ProtocolEditor
   include CellEditorEntity
 
   delegate :halo?, :halo=, to: @view
+
+  def append(rule : Rule, to collection : ProtocolCollection)
+    protocol = @state.protocol_from(collection)
+    protocol.append(rule)
+  end
 end

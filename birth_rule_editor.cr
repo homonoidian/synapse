@@ -9,6 +9,12 @@ class BirthRuleEditorState < RuleEditorState
     1 # Code buffer
   end
 
+  def to_rule : Rule
+    code = @states[0]?.as?(RuleCodeRowState).try &.string || ""
+
+    BirthRule.new(code)
+  end
+
   def new_substate_for(index : Int)
     RuleCodeRowState.new
   end
@@ -116,7 +122,7 @@ end
 #
 # Birth rules are rules that are expressed once when the receiver
 # cell is born. They are very similar to initializers in OOP.
-class BirthRuleEditor
+class BirthRuleEditor < RuleEditor
   include MonoBufferController(BirthRuleEditorState, BirthRuleEditorView)
 
   include BufferEditorHandler
@@ -124,4 +130,8 @@ class BirthRuleEditor
   include BufferEditorColumnHandler
   include CellEditorEntity
   include RuleEditorHandler
+
+  def to_rule : Rule
+    @state.to_rule
+  end
 end

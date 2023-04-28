@@ -396,7 +396,7 @@ class CellEditor
     @mouse = SF.vector2f(0, 0)
     @menu = new_menu
     @entities = [] of CellEditorEntity
-    @vertices = [] of {ProtocolEditor, CellEditorEntity}
+    @vertices = [] of {ProtocolEditor, RuleEditor}
     @dragging = Stream({CellEditorEntity, DragEvent}).new
     @dragging.each { |subject, event| on_motion(subject, event) }
   end
@@ -431,6 +431,8 @@ class CellEditor
       subject.halo = false
       return
     end
+
+    return unless subject.is_a?(RuleEditor)
 
     connected = false
     subject_index = @entities.size - 1
@@ -635,8 +637,18 @@ class CellEditor
     forward(event)
   end
 
+  def to_protocol_collection
+    collection = ProtocolCollection.new
+
+    @vertices.each do |from, to| # FIXME: this ignores empty protocols
+      from.append(to.to_rule, to: collection)
+    end
+
+    collection
+  end
+
   def draw(target, states)
-    vertices = SF::VertexArray.new(SF::Lines)
+    vertices = SF::VertexArray.new(SF::Lines, 2 * @vertices.size)
 
     @vertices.each do |from, to|
       vertices.append SF::Vertex.new(from.position + from.size/2, SF::Color.new(0x43, 0x51, 0x80))
@@ -650,6 +662,57 @@ class CellEditor
     if @menu.focused?
       @menu.draw(target, states)
     end
+  end
+end
+
+abstract class RuleSignature
+end
+
+class HeartbeatRuleSignature < RuleSignature
+  def initialize(@period : Time::Span?)
+  end
+end
+
+class KeywordRuleSignature < RuleSignature
+  def initialize(@keyword : String, @params : Array(String))
+  end
+end
+
+abstract class Rule
+  def initialize(@code : String)
+  end
+end
+
+class BirthRule < Rule
+end
+
+class SignatureRule < Rule
+  def initialize(@signature : RuleSignature, code)
+    super(code)
+  end
+end
+
+class Protocol
+  def initialize(@uid : UUID, @name : String?)
+    @rules = [] of Rule
+  end
+
+  def append(rule : Rule)
+    @rules << rule
+  end
+end
+
+class ProtocolCollection
+  def initialize
+    @protocols = {} of UUID => Protocol
+  end
+
+  def summon(id : UUID, name : String?)
+    @protocols[id] ||= Protocol.new(id, name)
+  end
+
+  def assign(id : UUID, protocol : Protocol)
+    @protocols[id] = protocol
   end
 end
 
@@ -751,16 +814,25 @@ window = SF::RenderWindow.new(SF::VideoMode.new(800, 600), title: "App", setting
 window.framerate_limit = 60
 
 editor = CellEditor.new
+texture = SF::RenderTexture.new(600, 400)
 
 while window.open?
   while event = window.poll_event
     case event
     when SF::Event::Closed then window.close
+    when SF::Event::KeyPressed
+      if event.code.escape?
+        pp editor.to_protocol_collection
+      end
     end
     editor.handle(event)
   end
 
-  window.clear(SF::Color.new(0x21, 0x21, 0x21))
-  window.draw(editor)
+  texture.clear(SF::Color.new(0x21, 0x21, 0x21))
+  texture.draw(editor)
+  texture.display
+
+  window.clear(SF::Color.new(0xff, 0xff, 0xff))
+  window.draw(SF::Sprite.new texture.texture)
   window.display
 end

@@ -3,6 +3,11 @@
 # Rule code row contains one and only one buffer editor: the
 # rule code buffer editor.
 class RuleCodeRowState < BufferEditorRowState
+  def string
+    editor = @states[0].as(BufferEditorState)
+    editor.string
+  end
+
   def min_size
     1
   end

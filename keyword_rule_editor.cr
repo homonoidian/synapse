@@ -10,6 +10,13 @@ class KeywordRuleEditorState < RuleEditorState
     2 # Rule header + rule code
   end
 
+  def to_rule : Rule
+    header = @states[0].as(RuleHeaderState)
+    code = @states[1]?.as?(RuleCodeRowState).try &.string || ""
+
+    SignatureRule.new(header.to_rule_signature, code)
+  end
+
   def new_substate_for(index : Int)
     {KeywordRuleHeaderState, RuleCodeRowState}[index].new
   end
@@ -165,7 +172,7 @@ end
 #
 # Keyword rules are rules whose expression depends on whether an
 # incoming message's keyword matches the keyword of the rule.
-class KeywordRuleEditor
+class KeywordRuleEditor < RuleEditor
   include MonoBufferController(KeywordRuleEditorState, KeywordRuleEditorView)
 
   include BufferEditorHandler
@@ -173,4 +180,8 @@ class KeywordRuleEditor
   include KeywordRuleEditorHandler
   include CellEditorEntity
   include RuleEditorHandler
+
+  def to_rule : Rule
+    @state.to_rule
+  end
 end

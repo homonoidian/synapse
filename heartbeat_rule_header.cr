@@ -33,6 +33,23 @@ class HeartbeatRuleHeaderState < KeywordRuleHeaderState
     drop
   end
 
+  def to_rule_signature
+    period = @states[1]?.as?(PeriodInputState).try &.string
+
+    return HeartbeatRuleSignature.new(period: nil) unless period
+
+    # FIXME: handle to_i failure?
+    if period_s = period.rchop?("ms")
+      period_span = period_s.to_i.milliseconds
+    elsif period_s = period.rchop?("s")
+      period_span = period_s.to_i.seconds
+    else
+      period_span = nil # FIXME: this should be an error arm!
+    end
+
+    HeartbeatRuleSignature.new(period_span)
+  end
+
   def new_substate_for(index : Int)
     index == 0 ? HeartbeatInputState.new : PeriodInputState.new
   end

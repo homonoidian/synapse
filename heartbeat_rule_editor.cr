@@ -18,7 +18,7 @@ end
 #
 # Heartbeat rules are rules whose expression happens on every tick,
 # or after a period if this period is specified.
-class HeartbeatRuleEditor
+class HeartbeatRuleEditor < RuleEditor
   include MonoBufferController(HeartbeatRuleEditorState, HeartbeatRuleEditorView)
 
   include BufferEditorHandler
@@ -26,4 +26,8 @@ class HeartbeatRuleEditor
   include KeywordRuleEditorHandler
   include CellEditorEntity
   include RuleEditorHandler
+
+  def to_rule : Rule
+    @state.to_rule
+  end
 end

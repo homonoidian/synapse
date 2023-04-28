@@ -1,5 +1,9 @@
 # Rule header state. See subclasses for more specific descriptions.
 abstract class RuleHeaderState < InputFieldRowState
+  # Builds and returns a `RuleSignature` object corresponding
+  # to the contents of this rule header.
+  abstract def to_rule_signature : RuleSignature
+
   def min_size
     1
   end

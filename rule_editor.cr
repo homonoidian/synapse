@@ -1,5 +1,8 @@
 # The state of a rule editor. See subclasses for more specific info.
-class RuleEditorState < BufferEditorColumnState
+abstract class RuleEditorState < BufferEditorColumnState
+  # Builds and returns a `Rule` object corresponding to the
+  # contents of this rule editor state.
+  abstract def to_rule : Rule
 end
 
 # The view of a rule editor. See subclasses for more specific info.
@@ -92,4 +95,10 @@ module RuleEditorHandler
   def drop
     @view.shadow = false
   end
+end
+
+abstract class RuleEditor
+  # Builds and returns a `Rule` object corresponding to the
+  # contents of this rule editor.
+  abstract def to_rule : Rule
 end

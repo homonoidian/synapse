@@ -13,6 +13,11 @@ class BufferEditorState
     @buffer = TextBuffer.new(value)
   end
 
+  # Returns the string content of this state.
+  def string
+    @buffer.string
+  end
+
   # Primitive: updates the buffer.
   #
   # **Unchecked**: may invalidate the state. Make sure to
@@ -31,7 +36,7 @@ class BufferEditorState
   #
   # See `BufferEditorInstant`.
   def capture
-    BufferEditorInstant.new(Time.local.to_unix, @buffer.string, @cursor)
+    BufferEditorInstant.new(Time.local.to_unix, string, @cursor)
   end
 
   # Moves cursor to *index*.
@@ -359,9 +364,6 @@ end
 # An `SF::Drawable` view of `BufferEditorState`.
 class BufferEditorView
   include IView
-
-  # Determines whether this view is active.
-  property? active = true
 
   def initialize
     @text = SF::Text.new("", font, font_size)
