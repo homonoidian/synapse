@@ -401,6 +401,14 @@ class CellEditor
     @dragging.each { |subject, event| on_motion(subject, event) }
   end
 
+  def append(entity : CellEditorEntity)
+    @entities << entity
+  end
+
+  def connect(protocol : ProtocolEditor, rule : RuleEditor)
+    @vertices << {protocol, rule}
+  end
+
   def can_connect?(entity, subject, point)
     point.in?(entity) && !@vertices.any?({entity, subject})
   end
@@ -445,7 +453,7 @@ class CellEditor
       next unless entity.is_a?(ProtocolEditor)
 
       if can_connect?(entity, subject, @mouse)
-        @vertices << {entity, subject}
+        connect(entity, subject)
         connected = true
       end
 
@@ -647,6 +655,10 @@ class CellEditor
     collection
   end
 
+  def append(collection : ProtocolCollection)
+    collection.append(into: self)
+  end
+
   def draw(target, states)
     vertices = SF::VertexArray.new(SF::Lines, 2 * @vertices.size)
 
@@ -671,10 +683,48 @@ end
 class HeartbeatRuleSignature < RuleSignature
   def initialize(@period : Time::Span?)
   end
+
+  def append_rule(code : String, into editor : CellEditor)
+    state = HeartbeatRuleEditorState.new
+
+    if period = @period
+      header = state.selected # Rule header
+      header.split(backwards: false)
+      header.selected.insert("#{period.milliseconds}ms")
+    end
+
+    state.split(backwards: false)
+    state.selected.selected.insert(code)
+
+    rule = HeartbeatRuleEditor.new(state, HeartbeatRuleEditorView.new)
+    editor.append(rule)
+
+    rule
+  end
 end
 
 class KeywordRuleSignature < RuleSignature
   def initialize(@keyword : String, @params : Array(String))
+  end
+
+  def append_rule(code : String, into editor : CellEditor)
+    state = KeywordRuleEditorState.new
+
+    header = state.selected # Rule header
+    header.selected.insert(@keyword)
+
+    @params.each do |param|
+      header.split(backwards: false)
+      header.selected.insert(param)
+    end
+
+    state.split(backwards: false)
+    state.selected.selected.insert(code)
+
+    rule = KeywordRuleEditor.new(state, KeywordRuleEditorView.new)
+    editor.append(rule)
+
+    rule
   end
 end
 
@@ -684,11 +734,23 @@ abstract class Rule
 end
 
 class BirthRule < Rule
+  def append(into editor : CellEditor)
+    state = BirthRuleEditorState.new
+    state.code?.try &.insert(@code)
+    rule = BirthRuleEditor.new(state, BirthRuleEditorView.new)
+    editor.append(rule)
+
+    rule
+  end
 end
 
 class SignatureRule < Rule
   def initialize(@signature : RuleSignature, code)
     super(code)
+  end
+
+  def append(into editor : CellEditor)
+    @signature.append_rule(@code, into: editor)
   end
 end
 
@@ -699,6 +761,29 @@ class Protocol
 
   def append(rule : Rule)
     @rules << rule
+  end
+
+  def append(*, into editor : CellEditor)
+    #
+    # Create and append a protocol editor.
+    #
+    state = ProtocolEditorState.new(@uid)
+    if name = @name
+      state.selected.insert(name)
+    end
+
+    protocol = ProtocolEditor.new(state, ProtocolEditorView.new)
+
+    editor.append(protocol)
+
+    #
+    # Create and append rule editors.
+    #
+    @rules.each do |rule|
+      appended = rule.append(into: editor)
+
+      editor.connect(protocol, appended)
+    end
   end
 end
 
@@ -713,6 +798,10 @@ class ProtocolCollection
 
   def assign(id : UUID, protocol : Protocol)
     @protocols[id] = protocol
+  end
+
+  def append(*, into editor : CellEditor)
+    @protocols.each_value &.append(into: editor)
   end
 end
 
@@ -813,7 +902,13 @@ end
 window = SF::RenderWindow.new(SF::VideoMode.new(800, 600), title: "App", settings: SF::ContextSettings.new(depth: 24, antialiasing: 8))
 window.framerate_limit = 60
 
+protocols = ProtocolCollection.new
+foo = protocols.summon(UUID.random, "Greeter")
+foo.append(SignatureRule.new(KeywordRuleSignature.new("greet", ["name", "age"]), "print(name)"))
+
 editor = CellEditor.new
+editor.append(protocols)
+
 texture = SF::RenderTexture.new(600, 400)
 
 while window.open?
@@ -822,7 +917,9 @@ while window.open?
     when SF::Event::Closed then window.close
     when SF::Event::KeyPressed
       if event.code.escape?
-        pp editor.to_protocol_collection
+        coll = editor.to_protocol_collection
+        editor = CellEditor.new
+        editor.append(coll)
       end
     end
     editor.handle(event)

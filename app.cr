@@ -650,6 +650,7 @@ class ProtocolEditor
 
   def initialize(@cell : Cell, @state : ProtocolEditorState)
     @editor_view = BufferEditorView.new
+    @editor_view.active = true
     @editor = BufferEditor.new(@state.bstate, @editor_view)
   end
 

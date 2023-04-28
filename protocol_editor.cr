@@ -26,10 +26,14 @@ end
 # Protocol editors allow to create *protocol*s, which are,
 # simply speaking, "umbrellas" for rules.
 class ProtocolEditorState < InputFieldRowState
-  def initialize(*args, **kwargs)
+  def initialize
     super
 
     @id = UUID.random # protocol unique ID stub
+  end
+
+  def initialize(@id : UUID)
+    super()
   end
 
   def capture

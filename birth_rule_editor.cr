@@ -9,8 +9,13 @@ class BirthRuleEditorState < RuleEditorState
     1 # Code buffer
   end
 
+  def code?
+    code = @states[0].as(RuleCodeRowState)
+    code.selected
+  end
+
   def to_rule : Rule
-    code = @states[0]?.as?(RuleCodeRowState).try &.string || ""
+    code = code?.try &.string || ""
 
     BirthRule.new(code)
   end
