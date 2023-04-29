@@ -23,6 +23,8 @@ module CellEditorEntity # FIXME: ???
   end
 end
 
+record EntityDragEvent, entity : CellEditorEntity, event : DragEvent
+
 require "./line"
 require "./buffer"
 require "./controller"
@@ -397,8 +399,8 @@ class CellEditor
     @menu = new_menu
     @entities = [] of CellEditorEntity
     @vertices = [] of {ProtocolEditor, RuleEditor}
-    @dragging = Stream({CellEditorEntity, DragEvent}).new
-    @dragging.each { |subject, event| on_motion(subject, event) }
+    @dragging = Stream(EntityDragEvent).new
+    @dragging.each { |event| on_motion(event.entity, event.event) }
   end
 
   def size
@@ -564,7 +566,7 @@ class CellEditor
 
     # Forward dragging of the editor to the common dragging stream.
     editor.dragging
-      .map { |event| {editor.as(CellEditorEntity), event} }
+      .map { |event| EntityDragEvent.new(editor, event) }
       .notifies(@dragging)
 
     lift(@entities.size - 1, grab)
