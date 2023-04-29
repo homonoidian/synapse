@@ -321,6 +321,18 @@ class ExpressionContext
     1
   end
 
+  # Specifies whether the cell is allowed to replicate during
+  # this expression.
+  def allowed_to_replicate?
+    true
+  end
+
+  # Specifies whether the cell is allowed to die during
+  # this expression.
+  def allowed_to_die?
+    true
+  end
+
   # Populates *stack* with globals related to this expression context.
   def fill(stack : Lua::Stack)
     stack.set_global("self", @receiver.memory)
@@ -330,11 +342,30 @@ class ExpressionContext
     stack.set_global("entropy", ->entropy(LibLua::State))
     stack.set_global("ascent", ->ascent(LibLua::State))
     stack.set_global("rand", ->rand(LibLua::State))
-    stack.set_global("replicate", ->replicate(LibLua::State))
-    stack.set_global("die", ->die(LibLua::State))
     stack.set_global("send", ->send(LibLua::State))
     stack.set_global("swim", ->swim(LibLua::State))
     stack.set_global("print", ->print(LibLua::State))
+
+    if allowed_to_die?
+      stack.set_global("die", ->die(LibLua::State))
+    end
+
+    if allowed_to_replicate?
+      stack.set_global("replicate", ->replicate(LibLua::State))
+    end
+  end
+end
+
+# Same as `ExpressionContext`, except death and replication
+# are forbidden (because e.g. replicating during birth will
+# cause infinite, extremely explosive replication).
+class BirthExpressionContext < ExpressionContext
+  def allowed_to_die?
+    false
+  end
+
+  def allowed_to_replicate?
+    false
   end
 end
 

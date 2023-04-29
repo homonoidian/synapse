@@ -763,7 +763,7 @@ class BirthRule < Rule
   def result(receiver : Cell) : ExpressionResult
     stack = Lua::Stack.new
 
-    res = ExpressionContext.new(receiver)
+    res = BirthExpressionContext.new(receiver)
     res.fill(stack)
 
     begin

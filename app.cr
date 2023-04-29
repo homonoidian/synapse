@@ -1007,7 +1007,7 @@ class Cell < RoundEntity
   end
 
   def self.radius
-    15
+    8
   end
 
   def self.mass
@@ -1414,6 +1414,7 @@ class Tank
 
   def initialize
     @space = CP::Space.new
+    @space.use_spatial_hash(dim: 4, count: 4096)
     @space.damping = 0.3
     @space.gravity = CP.v(0, 0)
 
