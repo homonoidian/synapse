@@ -52,20 +52,6 @@ require "./heartbeat_rule_editor"
 require "./protocol_name_editor"
 require "./protocol_editor"
 
-# FONT        = SF::Font.from_memory({{read_file("./fonts/code/scientifica.otb")}}.to_slice)
-# FONT_BOLD   = SF::Font.from_memory({{read_file("./fonts/code/scientificaBold.otb")}}.to_slice)
-# FONT_ITALIC = SF::Font.from_memory({{read_file("./fonts/code/scientificaItalic.otb")}}.to_slice)
-
-# FONT.get_texture(11).smooth = false
-# FONT_BOLD.get_texture(11).smooth = false
-# FONT_ITALIC.get_texture(11).smooth = false
-
-# FONT_UI        = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Regular.ttf")}}.to_slice)
-# FONT_UI_MEDIUM = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Medium.ttf")}}.to_slice)
-# FONT_UI_BOLD   = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Bold.ttf")}}.to_slice)
-
-# ----------------------------------------------------------
-
 class LabelInstant
   getter timestamp : Int64
   getter caption : String
@@ -398,9 +384,20 @@ class CellEditor
     @mouse = SF.vector2f(0, 0)
     @menu = new_menu
     @entities = [] of CellEditorEntity
-    @vertices = [] of {ProtocolEditor, RuleEditor}
+    @links = [] of {ProtocolEditor, RuleEditor}
     @dragging = Stream(EntityDragEvent).new
     @dragging.each { |event| on_motion(event.entity, event.event) }
+    @view = SF::View.new
+    @view.reset(SF.float_rect(0, 0, size.x, size.y))
+  end
+
+  def mouse
+    delta = @view.center - size/2
+
+    mouse = @mouse
+    mouse.x += delta.x.to_i
+    mouse.y += delta.y.to_i
+    mouse
   end
 
   def size
@@ -412,11 +409,11 @@ class CellEditor
   end
 
   def connect(protocol : ProtocolEditor, rule : RuleEditor)
-    @vertices << {protocol, rule}
+    @links << {protocol, rule}
   end
 
   def can_connect?(entity, subject, point)
-    point.in?(entity) && !@vertices.any?({entity, subject})
+    point.in?(entity) && !@links.any?({entity, subject})
   end
 
   def on_motion(subject, event : DragEvent::Grabbed)
@@ -434,7 +431,7 @@ class CellEditor
       # Halo the protocol editor below the moved entity (if any).
       next unless entity.is_a?(ProtocolEditor)
 
-      entity.halo = can_connect?(entity, subject, @mouse)
+      entity.halo = can_connect?(entity, subject, mouse)
     end
   end
 
@@ -458,7 +455,7 @@ class CellEditor
 
       next unless entity.is_a?(ProtocolEditor)
 
-      if can_connect?(entity, subject, @mouse)
+      if can_connect?(entity, subject, mouse)
         connect(entity, subject)
         connected = true
       end
@@ -547,12 +544,22 @@ class CellEditor
     activate(index)
 
     if grab
-      subject.move(@mouse - subject.size/2)
-      subject.grab(@mouse)
+      subject.move(mouse - subject.size/2)
+      subject.grab(mouse)
       subject.refresh
     else
-      subject.move(@mouse)
+      subject.move(mouse)
     end
+  end
+
+  def forward(event : SF::Event::MouseMoveEvent | SF::Event::MouseButtonEvent)
+    return unless entity = selected?
+
+    delta = @view.center - size/2
+    event.x += delta.x.to_i
+    event.y += delta.y.to_i
+
+    entity.handle(event)
   end
 
   def forward(event : SF::Event)
@@ -593,9 +600,11 @@ class CellEditor
     put_editor(editor)
   end
 
+  @lmb : SF::Vector2f?
+
   def handle(event : SF::Event::MouseButtonPressed)
     focus = selected?
-    @mouse = mouse = SF.vector2f(event.x, event.y)
+    @mouse = SF.vector2f(event.x, event.y)
 
     if focus && mouse.in?(focus)
       forward(event)
@@ -617,6 +626,8 @@ class CellEditor
       end
 
       activate(nil)
+
+      @lmb = mouse
     when .right?
       @menu.move(mouse.x + 5, mouse.y + 5)
       @menu.focus
@@ -644,7 +655,23 @@ class CellEditor
   def handle(event : SF::Event::MouseMoved)
     @mouse = SF.vector2f(event.x, event.y)
 
-    forward(event)
+    unless lmb = @lmb
+      forward(event)
+      return
+    end
+
+    view = @view
+    view.move(lmb - mouse)
+    @lmb = mouse
+  end
+
+  def handle(event : SF::Event::MouseButtonReleased)
+    unless @lmb
+      forward(event)
+      return
+    end
+
+    @lmb = nil
   end
 
   def handle(event : SF::Event)
@@ -654,7 +681,7 @@ class CellEditor
   def to_protocol_collection
     collection = ProtocolCollection.new
 
-    @vertices.each do |from, to| # FIXME: this ignores empty protocols
+    @links.each do |from, to| # FIXME: this ignores empty protocols
       from.append(to.to_rule, to: collection)
     end
 
@@ -666,14 +693,16 @@ class CellEditor
   end
 
   def draw(target, states)
-    vertices = SF::VertexArray.new(SF::Lines, 2 * @vertices.size)
+    target.view = @view
 
-    @vertices.each do |from, to|
-      vertices.append SF::Vertex.new(from.position + from.size/2, SF::Color.new(0x43, 0x51, 0x80))
-      vertices.append SF::Vertex.new(to.position + to.size/2, SF::Color.new(0x43, 0x51, 0x80))
+    links = SF::VertexArray.new(SF::Lines, 2 * @links.size)
+
+    @links.each do |from, to|
+      links.append SF::Vertex.new(from.position + from.size/2, SF::Color.new(0x43, 0x51, 0x80))
+      links.append SF::Vertex.new(to.position + to.size/2, SF::Color.new(0x43, 0x51, 0x80))
     end
 
-    vertices.draw(target, states)
+    links.draw(target, states)
 
     @entities.each &.draw(target, states)
 
@@ -1048,19 +1077,6 @@ class ProtocolCollection
   end
 end
 
-# ----------------------------------------------------------
-
-# TODO:
-# [ ] Have a column of RuleEditors (RuleEditorColumn) where the
-#     last RuleEditor is going to be the "insertion point" -- if
-#     you type there a new empty rule editor appears below, and
-#     this one is yours to change.
-#
-# [ ] Backspace in an empty ruleeditor should remove it unless it
-#     is the last (insertion point) rule editor.
-#
-# ------- Alternatively:
-#
 # [x] BirthRuleEditor
 # [x] HeartbeatRuleEditor
 # [x] extract RuleEditor
@@ -1091,7 +1107,6 @@ end
 # [ ] allow rectangular select of editors: motion, deletion.
 # [ ] allow to undo/redo editor motion, deletion *when nothing is focused*.
 # [ ] add a way to display errors in rules
-# [ ] Fill a ProtocolCollection from UI, set UI from a ProtocolCollection
 #
 # [ ] Rules can send and receive *targeted*, internal messages. I.e.,
 #     rule 'mouse' sends internal message 'foo', a single internal
@@ -1116,63 +1131,5 @@ end
 #                                          +-------------+
 #
 #
-# [ ] When clicking on a cell in app, instead of showing code
-#     editor show a zoomed out "window" into this rule world.
-#     On click, expand it and redirect events there.
-#
-# -------
-#
-# [ ] Implement HeartbeatRule, BirthRuleEditor. ??? how to create them?
-#
-# [ ] RuleEditor can submit its RuleEditorState to an existing
-#     Rule object on C-s, can fill its RuleEditorState from an
-#     existing Rule object when not focused, when focused can
-#     observe an existing RuleObject and show sync/out of sync
-#     circle.
-#
-# [ ] Implement ProtocolEditor which is basically a big-smooth-
-#     font editable name (a subset of InputField) followed by
-#     RuleEditorColumn.
-#
-# [ ] ProtocolEditor can submit its ProtocolEditorState to an existing
-#     Protocol object on C-s, can observe & fill its ProtocolEditorState
-#     from an existing Protocol object when not focused, alternatively
-#     (when focused) show sync/out of sync circle.
-#
-# [ ] Replace the current Protocol/Rule/ProtocolEditor system
-#     with this new one.
-
-# window = SF::RenderWindow.new(SF::VideoMode.new(800, 600), title: "App", settings: SF::ContextSettings.new(depth: 24, antialiasing: 8))
-# window.framerate_limit = 60
-
-# protocols = ProtocolCollection.new
-# foo = protocols.summon(UUID.random, "Greeter")
-# foo.append(SignatureRule.new(KeywordRuleSignature.new("greet", ["name", "age"]), "print(name)"))
-
-# editor = CellEditor.new
-# editor.append(protocols)
-
-# texture = SF::RenderTexture.new(600, 400)
-
-# while window.open?
-#   while event = window.poll_event
-#     case event
-#     when SF::Event::Closed then window.close
-#     when SF::Event::KeyPressed
-#       if event.code.escape?
-#         coll = editor.to_protocol_collection
-#         editor = CellEditor.new
-#         editor.append(coll)
-#       end
-#     end
-#     editor.handle(event)
-#   end
-
-#   texture.clear(SF::Color.new(0x21, 0x21, 0x21))
-#   texture.draw(editor)
-#   texture.display
-
-#   window.clear(SF::Color.new(0xff, 0xff, 0xff))
-#   window.draw(SF::Sprite.new texture.texture)
-#   window.display
-# end
+# [x] When clicking on a cell in app, instead of showing code
+#     editor show a "window" into this rule world.

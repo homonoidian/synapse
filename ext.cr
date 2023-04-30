@@ -44,7 +44,7 @@ struct Vector2
     @y = y.to_f64
   end
 
-  def initialize(sf : SF::Vector2)
+  def initialize(sf : SF::Vector2 | CP::Vect)
     initialize(sf.x, sf.y)
   end
 
