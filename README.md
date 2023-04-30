@@ -25,7 +25,7 @@ stuff. At least have fun watching them haha :)
 
 **A cell emits pings, other cells follow/evade it depending on signal strength:**
 
-![Animation of the above](./res/mouseFollower.gif)
+![Animation of the above](./res/moveAway.gif)
 
 ## Installation
 
