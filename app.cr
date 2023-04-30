@@ -680,6 +680,10 @@ class Cell < RoundEntity
   def stop_inspection?(in tank : Tank)
     @protocol = @editor.to_protocol_collection
 
+    # FIXME: hack: Rerun birth rules unconditionally. But this
+    # should happen only if they changed!
+    @protocol.born(self, in: tank)
+
     true
   end
 

@@ -1,14 +1,31 @@
 # Synapse
 
-![A TOTALLY USELESS 1MIN GIF](./totallyUseless.gif)
-
 Read the horrible first draft dot pdf to learn more but beware this thing may
 die any moment.
 
 DISCLAIMER almost nothing from the AFOREMENTIONED first horrible draft is implemented! A lot
 of yak shaving ahead because it's FUN! (it's not)
 
+What's before you is REVISION ONE of the system -- basically a lot of Crystal swearing just
+to get it to work with the minimum amount of changes. I am a newb in UI dev (like starting-
+from-rectangles kind of UI dev), so this adds up -- adds up to form an enormous pile of
+crapcode with different approaches mixed, squashed, distorted and sploshed on the wall.
+It runs though, it runs!!
+
 TODO: Write a description here
+
+## Examples
+
+On the GIFs below you'll notice the interesting stuff as well as the bugs/not-working
+stuff. At least have fun watching them haha :)
+
+**A cell is following mouse, can notify other cells of this fact:**
+
+![Animation of the above](./res/mouseFollower.gif)
+
+**A cell emits pings, other cells follow/evade it depending on signal strength:**
+
+![Animation of the above](./res/mouseFollower.gif)
 
 ## Installation
 
@@ -16,9 +33,19 @@ TODO: Write installation instructions here
 
 ## Usage
 
+```
+$ ./build.sh
+[compiles Synapse in release to bin/synapse]
+```
+
 TODO: Write usage instructions here
 
 ## Development
+
+```
+$ ./run.sh
+[runs Synapse in debug-mode]
+```
 
 TODO: Write development instructions here
 
