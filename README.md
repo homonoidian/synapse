@@ -33,7 +33,7 @@ stuff. At least have fun watching them haha :)
 
 **Two cells act as turnpoints for another cell, which shares its protocol with a passerby**:
 
-![Animation of the above](./res/shareProtocol.gif.gif)
+![Animation of the above](./res/shareProtocol.gif)
 
 ## Installation
 
