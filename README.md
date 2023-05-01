@@ -31,6 +31,10 @@ stuff. At least have fun watching them haha :)
 
 ![Animation of the above](./res/toggleProtocol.gif)
 
+**Two cells act as turnpoints for another cell, which shares its protocol with a passerby**:
+
+![Animation of the above](./res/shareProtocol.gif.gif)
+
 ## Installation
 
 TODO: Write installation instructions here

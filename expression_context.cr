@@ -261,10 +261,12 @@ class ExpressionContext
   # Emits a message at the receiver. Strength can be assigned/
   # retrieved using `setStrength/getStength`.
   #
+  # Protocols, when sent, are cloned (recursively copied).
+  #
   # Synopsis:
   #
   # * `send(keyword : string)`
-  # * `send(keyword : string, ...args : boolean|number|table|string|nil)`
+  # * `send(keyword : string, ...args : protocol|boolean|number|table|string|nil)`
   def send(state : LibLua::State)
     stack = Lua::Stack.new(state, :all)
 
@@ -276,9 +278,19 @@ class ExpressionContext
 
     until stack.size == 1
       arg = stack.pop
-      unless arg.is_a?(Memorable)
-        raise Lua::RuntimeError.new("send(keyword, ...args): argument must be a boolean, number, table, string, or nil")
+
+      if arg.is_a?(Lua::Callable)
+        arg = arg.to_crystal
       end
+
+      unless arg.is_a?(MemorableValue) || arg.is_a?(OwnedProtocol)
+        raise Lua::RuntimeError.new("send(keyword, ...args): argument must be an owned protocol, boolean, number, table, string, or nil")
+      end
+
+      if arg.is_a?(OwnedProtocol)
+        arg = arg._pack
+      end
+
       args.unshift(arg)
     end
 
@@ -324,21 +336,23 @@ class ExpressionContext
     1
   end
 
-  # Switches a protocol on/off depending on *state*.
+  # Begins adhering to a protocol sent by another cell.
   #
   # Synopsis:
   #
-  # * `switch(protocol : string, state : boolean)`
-  def switch(state : LibLua::State)
+  # * `adhere(protocol : packed protocol)`
+  def adhere(state : LibLua::State)
     stack = Lua::Stack.new(state, :all)
 
-    state = stack.pop.as?(Bool)
-    protocol = stack.pop.as?(String)
-    if state.nil? || protocol.nil?
-      raise Lua::RuntimeError.new("switch(protocol : string, state : boolean): bad arguments #{protocol}, #{state}")
+    if protocol = stack.pop.as?(Lua::Callable)
+      protocol = protocol.to_crystal
     end
 
-    @receiver.switch(protocol, state)
+    unless protocol.is_a?(PackedProtocol)
+      raise Lua::RuntimeError.new("adhere(protocol): expected protocol to be a packed protocol")
+    end
+
+    protocol._accept(@receiver)
 
     1
   end
@@ -367,7 +381,13 @@ class ExpressionContext
     stack.set_global("send", ->send(LibLua::State))
     stack.set_global("swim", ->swim(LibLua::State))
     stack.set_global("print", ->print(LibLua::State))
-    stack.set_global("switch", ->switch(LibLua::State))
+    stack.set_global("adhere", ->adhere(LibLua::State))
+
+    # Expose owned protocols to the expressed rule so
+    # it can e.g. toggle them on/off or share them.
+    @receiver.each_owned_protocol_with_name do |protocol, name|
+      stack.set_global(name, protocol)
+    end
 
     if allowed_to_die?
       stack.set_global("die", ->die(LibLua::State))

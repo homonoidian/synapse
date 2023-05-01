@@ -710,6 +710,18 @@ class CellEditor
   end
 end
 
+struct Time::Span
+  def clone
+    self
+  end
+end
+
+class SF::Clock
+  def clone # Crap crap crap. Refer to FIXME (1) in this file (a bit below).
+    self
+  end
+end
+
 abstract class RuleSignature
 end
 
@@ -742,6 +754,8 @@ class HeartbeatRuleSignature < RuleSignature
 
     rule
   end
+
+  def_clone
 end
 
 class KeywordRuleSignature < RuleSignature
@@ -773,6 +787,8 @@ class KeywordRuleSignature < RuleSignature
 
     rule
   end
+
+  def_clone
 end
 
 abstract class Rule
@@ -820,6 +836,8 @@ class BirthRule < Rule
 
     rule
   end
+
+  def_clone
 end
 
 abstract class SignatureRule < Rule
@@ -846,13 +864,13 @@ record ErrResult < ExpressionResult, error : Lua::LuaError | ArgumentError, rule
   end
 end
 
-module ExpressibleFromVesicle
+module RuleExpressibleFromVesicle
   abstract def express(receiver : Cell, vesicle : Vesicle)
   abstract def matches?(vesicle : Vesicle) : Bool
 end
 
 class KeywordRule < SignatureRule
-  include ExpressibleFromVesicle
+  include RuleExpressibleFromVesicle
 
   def matches?(vesicle : Vesicle) : Bool
     @signature.matches?(vesicle.message)
@@ -887,13 +905,20 @@ class KeywordRule < SignatureRule
     result = result(receiver, vesicle.message, attack)
     receiver.interpret(result)
   end
+
+  def_clone
 end
 
 class HeartbeatRule < SignatureRule
   def initialize(signature, code)
     super
 
-    @clock = SF::Clock.new
+    @clock = SF::Clock.new # FIXME (1): THIS DOES NOT BELONG HERE!!!
+
+    # NOTE: (1) This should be managed by a Heart object which a Cell owns!
+    #           Heart could listen to changes in ProtocolCollection and traverse
+    #           the heartbeat rules accordingly -- ask each HeartbeatRule to add
+    #           itself with the expected period
   end
 
   # Returns the amount of *pending* lapses for this heartbeat
@@ -959,20 +984,38 @@ class HeartbeatRule < SignatureRule
 
     @clock.restart
   end
+
+  def_clone
+end
+
+struct UUID # Crap crap crap. Crap!
+  def clone
+    self
+  end
 end
 
 class Protocol
-  property enabled = true
-
   def initialize(@uid : UUID, @name : String?, @enabled : Bool)
     @rules = [] of Rule
   end
 
+  def enable
+    @enabled = true
+  end
+
+  def disable
+    @enabled = false
+  end
+
+  def toggle
+    @enabled = !@enabled
+  end
+
   def query(vesicle : Vesicle)
-    return [] of ExpressibleFromVesicle unless @enabled
+    return [] of RuleExpressibleFromVesicle unless @enabled
 
     @rules
-      .select(ExpressibleFromVesicle)
+      .select(RuleExpressibleFromVesicle)
       .select! &.matches?(vesicle)
   end
 
@@ -994,6 +1037,10 @@ class Protocol
 
   def append(rule : Rule)
     @rules << rule
+  end
+
+  def append(*, into collection : ProtocolCollection)
+    collection.assign(@uid, self)
   end
 
   def append(*, into editor : CellEditor)
@@ -1030,6 +1077,7 @@ class Protocol
   end
 
   def_equals_and_hash @uid
+  def_clone
 end
 
 class ProtocolCollection
@@ -1041,6 +1089,14 @@ class ProtocolCollection
   def each_protocol(&)
     @protocols.each_value do |protocol|
       yield protocol
+    end
+  end
+
+  def each_protocol_with_name(&)
+    @protocols_by_name.each do |name, protocols|
+      protocols.each do |protocol|
+        yield protocol, name
+      end
     end
   end
 
@@ -1093,6 +1149,10 @@ class ProtocolCollection
   end
 
   def on_memory_changed(receiver : Cell)
+  end
+
+  def summon(protocol : Protocol)
+    protocol.append(into: self)
   end
 
   def summon(id : UUID, name : String?, enabled : Bool)

@@ -218,7 +218,7 @@ abstract class PhysicalEntity < Entity
   end
 
   def mid
-    @body.position.x.at(@body.position.y)
+    @body.position.x.round.at(@body.position.y.round)
   end
 
   def mid=(mid : Vector2)
@@ -422,7 +422,102 @@ class Vesicle < RoundEntity
   end
 end
 
-alias Memorable = Bool | Float64 | Lua::Table | String | Nil
+# Owned protocols are Lua references to protocols during rule
+# expression, namely to protocols that the receiver cell *owns*,
+# and therefore can control.
+class OwnedProtocol
+  include LuaCallable
+
+  def initialize(@name : String, @protocol : Protocol)
+  end
+
+  # Returns the name of this protocol.
+  #
+  # Synopsis:
+  #
+  # * `OP.name` where *OP* is the owned protocol.
+  def name
+    @name
+  end
+
+  # Enables this protocol.
+  #
+  # Synopsis:
+  #
+  # * `OP.enable` where *OP* is the owned protocol.
+  def enable
+    @protocol.enable
+  end
+
+  # Disables this protocol.
+  #
+  # Synopsis:
+  #
+  # * `OP.disable` where *OP* is the owned protocol.
+  def disable
+    @protocol.disable
+  end
+
+  # Toggles this protocol on/off.
+  #
+  # Synopsis:
+  #
+  # * `OP.toggle` where *OP* is the owned protocol.
+  def toggle
+    @protocol.toggle
+  end
+
+  # Switches this protocol on/off depending on *state*.
+  #
+  # `true` means this protocol is going to be enabled.
+  # `false` means this protocol is going to be disabled.
+  #
+  # Synopsis:
+  #
+  # * `OP.switch(state : boolean)` where *OP* is the owned protocol.
+  def switch(state : Bool)
+    state ? enable : disable
+  end
+
+  # For internal use only (not accessible from Lua).
+  #
+  # Clones the underlying protocol object, and returns the `PackedProtocol`
+  # which wraps the clone.
+  def _pack
+    PackedProtocol.new(@name, @protocol.clone)
+  end
+end
+
+# Packed protocols are Lua references to protocols coming from/
+# packaged in messages.
+#
+# They are already have no connection with the sender. They
+# require the receiver cell to `adhere(packed protocol)` to
+# them explicitly.
+class PackedProtocol
+  include LuaCallable
+
+  def initialize(@name : String, @protocol : Protocol)
+  end
+
+  # Returns the name of the underlying protocol.
+  #
+  # Synopsis:
+  #
+  # * `PP.name` where *PP* is the packed protocol of interest.
+  def name
+    @name
+  end
+
+  # Asks *receiver* to accept this packed protocol, that is,
+  # to start adhering to it.
+  def _accept(receiver : Cell)
+    receiver.accept(@protocol)
+  end
+end
+
+alias MemorableValue = Bool | Float64 | Lua::Table | String | Nil
+alias Memorable = OwnedProtocol | PackedProtocol | MemorableValue
 
 # Raised when a receiver cell wants to commit suicide.
 class CommitSuicide < Exception
@@ -459,21 +554,31 @@ class Cell < RoundEntity
   def initialize
     super(self.class.color, lifespan: nil)
 
-    @protocol = ProtocolCollection.new
+    @protocols = ProtocolCollection.new
 
     @relatives = [] of Cell
 
     @editor = CellEditor.new
-    @editor.append(@protocol)
+    @editor.append(@protocols)
 
     @relatives << self
   end
 
-  def initialize(color : SF::Color, @protocol : ProtocolCollection, editor : CellEditor, @relatives : Array(Cell))
+  def initialize(color : SF::Color, @protocols : ProtocolCollection, editor : CellEditor, @relatives : Array(Cell))
     super(color, lifespan: nil)
 
     @editor = CellEditor.new
-    @editor.append(@protocol)
+    @editor.append(@protocols)
+  end
+
+  def each_owned_protocol_with_name
+    @protocols.each_protocol_with_name do |protocol, name|
+      yield OwnedProtocol.new(name, protocol), name
+    end
+  end
+
+  def accept(protocol : Protocol)
+    @protocols.summon(protocol)
   end
 
   def point_in_editor?(point : Vector2)
@@ -483,7 +588,7 @@ class Cell < RoundEntity
   end
 
   def copy
-    copy = Cell.new(@color, @protocol, @editor, @relatives)
+    copy = Cell.new(@color, @protocols, @editor, @relatives)
     @relatives << copy
     copy
   end
@@ -577,8 +682,8 @@ class Cell < RoundEntity
   end
 
   def switch(protocol : String, state : Bool)
-    @protocol.each_protocol_by_name(protocol) do |protocol|
-      protocol.enabled = state
+    @protocols.each_protocol_by_name(protocol) do |protocol|
+      state ? protocol.enable : protocol.disable
     end
   end
 
@@ -640,7 +745,7 @@ class Cell < RoundEntity
 
   def summon(*, in tank : Tank)
     super
-    @protocol.born(self, in: tank)
+    @protocols.born(self, in: tank)
     nil
   end
 
@@ -653,7 +758,7 @@ class Cell < RoundEntity
   end
 
   def receive(vesicle : Vesicle, in tank : Tank)
-    @protocol.express(receiver: self, vesicle: vesicle)
+    @protocols.express(receiver: self, vesicle: vesicle)
   rescue CommitSuicide
     suicide(in: tank)
   end
@@ -678,22 +783,22 @@ class Cell < RoundEntity
   end
 
   def editor_position
-    (mid + 32.at(32)).sf
+    (mid + 32.at(32)).sfi
   end
 
   def start_inspection?(in tank : Tank)
     @editor = CellEditor.new
-    @editor.append(@protocol)
+    @editor.append(@protocols)
 
     true
   end
 
   def stop_inspection?(in tank : Tank)
-    @protocol = @editor.to_protocol_collection
+    @protocols = @editor.to_protocol_collection
 
     # FIXME: hack: Rerun birth rules unconditionally. But this
     # should happen only if they changed!
-    @protocol.born(self, in: tank)
+    @protocols.born(self, in: tank)
 
     true
   end
@@ -701,20 +806,20 @@ class Cell < RoundEntity
   def on_memory_changed
     # The success of heartbeat rules also depends on the memory.
     # If memory changed, try to rerun heartbeat rules.
-    @protocol.on_memory_changed(self)
+    @protocols.on_memory_changed(self)
   end
 
   # Prefer using `Tank` to calling this method yourself because
   # sync of systoles/dyastoles between relatives is unsupported.
   def systole(in tank : Tank)
-    @protocol.systole(self, in: tank)
+    @protocols.systole(self, in: tank)
   rescue CommitSuicide
     suicide(in: tank)
   end
 
   # :ditto:
   def dyastole(in tank : Tank)
-    @protocol.dyastole(self, in: tank)
+    @protocols.dyastole(self, in: tank)
   rescue CommitSuicide
     suicide(in: tank)
   end
