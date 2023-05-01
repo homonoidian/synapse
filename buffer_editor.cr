@@ -435,7 +435,7 @@ class BufferEditorView
   end
 
   def position=(position : SF::Vector2)
-    delta = position - self.position
+    delta = (position - self.position).to_i
 
     @text.position += delta
     @beam.position += delta

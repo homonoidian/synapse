@@ -10,14 +10,17 @@ class ProtocolEditorInstant < BufferEditorRowInstant
   # when this instant was captured.
   getter id : UUID
 
-  def initialize(timestamp, states, selected, @id)
+  # Returns whether this protocol is enabled.
+  getter? enabled : Bool
+
+  def initialize(timestamp, states, selected, @id, @enabled)
     super(timestamp, states, selected)
   end
 
   # Initializes this instant from the parent buffer editor
   # row *instant*.
-  def initialize(instant : BufferEditorRowInstant, id : UUID)
-    initialize(instant.timestamp, instant.states, instant.selected, id)
+  def initialize(instant : BufferEditorRowInstant, id : UUID, enabled : Bool)
+    initialize(instant.timestamp, instant.states, instant.selected, id, enabled)
   end
 end
 
@@ -29,15 +32,16 @@ class ProtocolEditorState < InputFieldRowState
   def initialize
     super
 
-    @id = UUID.random # protocol unique ID stub
+    @id = UUID.random
+    @enabled = true
   end
 
-  def initialize(@id : UUID)
+  def initialize(@id : UUID, @enabled : Bool)
     super()
   end
 
   def capture
-    ProtocolEditorInstant.new(super, @id)
+    ProtocolEditorInstant.new(super, @id, @enabled)
   end
 
   def min_size
@@ -51,7 +55,7 @@ class ProtocolEditorState < InputFieldRowState
   def protocol_from(collection : ProtocolCollection)
     name = @states[0].as(ProtocolNameEditorState).string
 
-    collection.summon(@id, name)
+    collection.summon(@id, name, @enabled)
   end
 
   def new_substate_for(index : Int)
@@ -81,6 +85,7 @@ class ProtocolEditorView < InputFieldRowView
   def update(instant : ProtocolEditorInstant)
     super
     @id = instant.id
+    @enabled = instant.enabled?
   end
 
   def max_width
@@ -177,6 +182,17 @@ class ProtocolEditorView < InputFieldRowView
     cap.draw(target, states)
 
     super
+
+    return if @enabled
+
+    #
+    # Draw dark semi-transparent overlay if protocol is disabled.
+    #
+    overlay = SF::RectangleShape.new
+    overlay.position = position
+    overlay.size = size
+    overlay.fill_color = SF::Color.new(0, 0, 0, 0x66)
+    overlay.draw(target, states)
   end
 end
 

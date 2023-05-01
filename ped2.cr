@@ -11,7 +11,7 @@ module CellEditorEntity # FIXME: ???
   end
 
   def move(position : SF::Vector2)
-    @view.position = position
+    @view.position = position.round
 
     refresh
   end
@@ -290,7 +290,7 @@ class Menu
   delegate :active=, :active?, to: @view
 
   def move(x : Number, y : Number)
-    @view.position = SF.vector2f(x, y)
+    @view.position = SF.vector2f(x, y).round
 
     refresh
   end
@@ -388,7 +388,7 @@ class CellEditor
     @dragging = Stream(EntityDragEvent).new
     @dragging.each { |event| on_motion(event.entity, event.event) }
     @view = SF::View.new
-    @view.reset(SF.float_rect(0, 0, size.x, size.y))
+    @view.reset(SF.float_rect(0, 0, size.x.to_i, size.y.to_i))
   end
 
   def mouse
@@ -493,14 +493,12 @@ class CellEditor
 
   def new_heartbeat_rule
     view = HeartbeatRuleEditorView.new
-
     rule = HeartbeatRuleEditor.new(HeartbeatRuleEditorState.new, view)
     rule
   end
 
   def new_protocol
     view = ProtocolEditorView.new
-
     rule = ProtocolEditor.new(ProtocolEditorState.new, view)
     rule
   end
@@ -661,7 +659,7 @@ class CellEditor
     end
 
     view = @view
-    view.move(lmb - mouse)
+    view.move((lmb - mouse).to_i)
     @lmb = mouse
   end
 
@@ -731,11 +729,13 @@ class HeartbeatRuleSignature < RuleSignature
     if period = @period
       header = state.selected # Rule header
       header.split(backwards: false)
-      header.selected.insert("#{period.milliseconds}ms")
+      header.selected.insert("#{period.total_milliseconds.to_i}ms")
     end
 
-    state.split(backwards: false)
-    state.selected.selected.insert(code)
+    unless code.empty?
+      state.split(backwards: false)
+      state.selected.selected.insert(code)
+    end
 
     rule = HeartbeatRuleEditor.new(state, HeartbeatRuleEditorView.new)
     editor.append(rule)
@@ -763,8 +763,10 @@ class KeywordRuleSignature < RuleSignature
       header.selected.insert(param)
     end
 
-    state.split(backwards: false)
-    state.selected.selected.insert(code)
+    unless code.empty?
+      state.split(backwards: false)
+      state.selected.selected.insert(code)
+    end
 
     rule = KeywordRuleEditor.new(state, KeywordRuleEditorView.new)
     editor.append(rule)
@@ -960,23 +962,31 @@ class HeartbeatRule < SignatureRule
 end
 
 class Protocol
-  def initialize(@uid : UUID, @name : String?)
+  property enabled = true
+
+  def initialize(@uid : UUID, @name : String?, @enabled : Bool)
     @rules = [] of Rule
   end
 
   def query(vesicle : Vesicle)
+    return [] of ExpressibleFromVesicle unless @enabled
+
     @rules
       .select(ExpressibleFromVesicle)
       .select! &.matches?(vesicle)
   end
 
   def each_heartbeat
+    return unless @enabled
+
     @rules.each do |rule|
       yield rule if rule.is_a?(HeartbeatRule)
     end
   end
 
   def each_birth_rule
+    return unless @enabled
+
     @rules.each do |rule|
       yield rule if rule.is_a?(BirthRule)
     end
@@ -990,7 +1000,7 @@ class Protocol
     #
     # Create and append a protocol editor.
     #
-    state = ProtocolEditorState.new(@uid)
+    state = ProtocolEditorState.new(@uid, @enabled)
     if name = @name
       state.selected.insert(name)
     end
@@ -1008,15 +1018,36 @@ class Protocol
       editor.connect(protocol, appended)
     end
   end
+
+  def append_by_name(*, into collection : Hash(String, Set(Protocol)))
+    return unless name = @name
+
+    if set = collection[name]?
+      set << self
+    else
+      collection[name] = Set{self}
+    end
+  end
+
+  def_equals_and_hash @uid
 end
 
 class ProtocolCollection
   def initialize
     @protocols = {} of UUID => Protocol
+    @protocols_by_name = Hash(String, Set(Protocol)).new
   end
 
-  def each_protocol
+  def each_protocol(&)
     @protocols.each_value do |protocol|
+      yield protocol
+    end
+  end
+
+  def each_protocol_by_name(name : String, &)
+    return unless set = @protocols_by_name[name]?
+
+    set.each do |protocol|
       yield protocol
     end
   end
@@ -1064,12 +1095,16 @@ class ProtocolCollection
   def on_memory_changed(receiver : Cell)
   end
 
-  def summon(id : UUID, name : String?)
-    @protocols[id] ||= Protocol.new(id, name)
+  def summon(id : UUID, name : String?, enabled : Bool)
+    protocol = @protocols[id] ||= Protocol.new(id, name, enabled)
+    protocol.append_by_name(into: @protocols_by_name) # WTF? why do you take name as an arg then?
+    protocol
   end
 
   def assign(id : UUID, protocol : Protocol)
     @protocols[id] = protocol
+    protocol.append_by_name(into: @protocols_by_name)
+    protocol
   end
 
   def append(*, into editor : CellEditor)

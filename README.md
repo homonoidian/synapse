@@ -27,6 +27,10 @@ stuff. At least have fun watching them haha :)
 
 ![Animation of the above](./res/moveAway.gif)
 
+**A cell moves in a square, toggles emission of messages every 500ms**:
+
+![Animation of the above](./res/toggleProtocol.gif)
+
 ## Installation
 
 TODO: Write installation instructions here

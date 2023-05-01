@@ -32,6 +32,10 @@ struct SF::Vector2(T)
   def to_i
     SF.vector2i(x.to_i, y.to_i)
   end
+
+  def round
+    SF.vector2f(x.round, y.round)
+  end
 end
 
 # Represents a two-dimensional vector.
@@ -196,8 +200,7 @@ class ClockAuthority
   end
 end
 
-# A very primitive `SF::Clock`-based scheduler that doesn't
-# spawn fibers.
+# A very primitive scheduler that doesn't spawn fibers.
 class TimeTable
   class Entry
     getter? repeating : Bool

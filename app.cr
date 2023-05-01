@@ -576,6 +576,12 @@ class Cell < RoundEntity
     view
   end
 
+  def switch(protocol : String, state : Bool)
+    @protocol.each_protocol_by_name(protocol) do |protocol|
+      protocol.enabled = state
+    end
+  end
+
   def prn(message : String)
     @tanks.each &.prn(self, message)
   end
@@ -613,7 +619,10 @@ class Cell < RoundEntity
   end
 
   def interpret(result : ExpressionResult)
-    return unless result.is_a?(ErrResult)
+    unless result.is_a?(ErrResult)
+      self.sync = true
+      return
+    end
 
     @tanks.each do |tank|
       fail(result, tank)
@@ -660,6 +669,8 @@ class Cell < RoundEntity
     # Signal that what's currently running is out of sync from
     # what's being shown.
     self.sync = false
+
+    pp err # FIXME: Uhmmm maybe have a better way to signal error???
   end
 
   def handle(event)
@@ -731,14 +742,6 @@ class Cell < RoundEntity
       sync_color_opaque = SF::Color.new(sync_color.r, sync_color.g, sync_color.b)
 
       #
-      # Draw line from origin of editor to center of cell.
-      #
-      va = SF::VertexArray.new(SF::Lines, 2)
-      va.append(SF::Vertex.new(mid.sfi, sync_color_opaque))
-      va.append(SF::Vertex.new(editor_position, sync_color_opaque))
-      target.draw(va)
-
-      #
       # Draw little circles at start of line to really show
       # which cell is selected.
       #
@@ -755,6 +758,15 @@ class Cell < RoundEntity
       bg_rect.position = editor_position - SF.vector2(3, 1)
       bg_rect.size = @editor.size + SF.vector2f(4, 2)
       target.draw(bg_rect)
+
+      #
+      # Draw a line from origin of background to the center of
+      # the cell.
+      #
+      va = SF::VertexArray.new(SF::Lines, 2)
+      va.append(SF::Vertex.new(mid.sfi, sync_color_opaque))
+      va.append(SF::Vertex.new(bg_rect.position, sync_color_opaque))
+      target.draw(va)
 
       @__texture.clear(SF::Color.new(0x25, 0x25, 0x25))
       @__texture.draw(@editor)

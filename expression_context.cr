@@ -314,9 +314,31 @@ class ExpressionContext
   # Prints to editor console.
   def print(state : LibLua::State)
     stack = Lua::Stack.new(state, :all)
-    string = (1..stack.size).join('\t') { |index| stack[index] || "nil" }
+    string = (1..stack.size).join('\t') do |index|
+      arg = stack[index]
+      arg.nil? ? "nil" : arg
+    end
 
     Console::INSTANCE.print string
+
+    1
+  end
+
+  # Switches a protocol on/off depending on *state*.
+  #
+  # Synopsis:
+  #
+  # * `switch(protocol : string, state : boolean)`
+  def switch(state : LibLua::State)
+    stack = Lua::Stack.new(state, :all)
+
+    state = stack.pop.as?(Bool)
+    protocol = stack.pop.as?(String)
+    if state.nil? || protocol.nil?
+      raise Lua::RuntimeError.new("switch(protocol : string, state : boolean): bad arguments #{protocol}, #{state}")
+    end
+
+    @receiver.switch(protocol, state)
 
     1
   end
@@ -345,6 +367,7 @@ class ExpressionContext
     stack.set_global("send", ->send(LibLua::State))
     stack.set_global("swim", ->swim(LibLua::State))
     stack.set_global("print", ->print(LibLua::State))
+    stack.set_global("switch", ->switch(LibLua::State))
 
     if allowed_to_die?
       stack.set_global("die", ->die(LibLua::State))
