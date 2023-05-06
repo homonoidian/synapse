@@ -22,6 +22,11 @@ require "colorize"
 require "string_scanner"
 require "open-simplex-noise"
 
+require "./entity"
+require "./physical_entity"
+require "./morph_entity"
+require "./circular_entity"
+
 require "./ext"
 require "./line"
 require "./buffer"
@@ -108,257 +113,16 @@ module Inspectable
   abstract def follow(in tank : Tank, view : SF::View) : SF::View
 end
 
+module Drawable
+  abstract def draw(target : SF::RenderTarget, in tank : Tank)
+end
+
 record Message, keyword : String, args : Array(Memorable), strength : Float64, decay = 0.0
 
-abstract class Entity
-  include SF::Drawable
+class Vesicle < CircularEntity
+  include Jitter
+  include Drawable
 
-  getter tt = TimeTable.new(App.time)
-
-  @decay_task_id : UUID
-
-  def initialize(@color : SF::Color, lifespan : Time::Span?)
-    @id = UUID.random
-    @tanks = [] of Tank
-
-    return unless lifespan
-
-    @decay_task_id = tt.after(lifespan) do
-      @tanks.each { |tank| suicide(in: tank) }
-    end
-  end
-
-  def self.z_index
-    0
-  end
-
-  def z_index
-    self.class.z_index
-  end
-
-  abstract def drawable
-
-  def summon(in tank : Tank)
-    @tanks << tank
-
-    tank.insert(self)
-
-    nil
-  end
-
-  def suicide(in tank : Tank)
-    @tanks.delete(tank)
-
-    tank.remove(self)
-
-    nil
-  end
-
-  def sync
-  end
-
-  def insert_into(collection : EntityCollection)
-    collection.insert(self.class, @id, entity: self)
-  end
-
-  def delete_from(collection : EntityCollection)
-    collection.delete(self.class, @id, entity: self)
-  end
-
-  def tick(delta : Float, in tank : Tank)
-    tt.tick
-
-    sync
-  end
-
-  def draw(target, states)
-    drawable.draw(target, states)
-  end
-
-  def draw(tank : Tank, target)
-    target.draw(self)
-  end
-
-  abstract def includes?(other : Vector2)
-
-  def_equals_and_hash @id
-end
-
-abstract class PhysicalEntity < Entity
-  @body : CP::Body
-  @shape : CP::Shape
-  private getter drawable : SF::Shape
-
-  def initialize(color : SF::Color, lifespan : Time::Span?)
-    super(color, lifespan)
-
-    @body = self.class.body
-    @shape = self.class.shape(@body)
-    @drawable = self.class.drawable(@color)
-  end
-
-  def width
-    @drawable.global_bounds.width + @drawable.local_bounds.left
-  end
-
-  def height
-    @drawable.global_bounds.height + @drawable.local_bounds.top
-  end
-
-  def self.mass
-    10.0
-  end
-
-  def self.friction
-    10.0
-  end
-
-  def self.elasticity
-    0.4
-  end
-
-  def mid
-    @body.position.x.round.at(@body.position.y.round)
-  end
-
-  def mid=(mid : Vector2)
-    @body.position = mid.cp
-    sync
-    mid
-  end
-
-  def stop
-    @body.velocity = 0.at(0).cp
-  end
-
-  def velocity
-    @body.velocity.x.at(@body.velocity.y)
-  end
-
-  def velocity=(velocity : Vector2)
-    @body.velocity = velocity.cp
-
-    velocity
-  end
-
-  def includes?(other : Vector2)
-    other.x.in?(mid.x - width//2..mid.x + width//2) &&
-      other.y.in?(mid.y - height//2..mid.y + height//2)
-  end
-
-  def summon(in tank : Tank)
-    super
-
-    tank.insert(self, @body)
-    tank.insert(self, @shape)
-
-    nil
-  end
-
-  def suicide(in tank : Tank)
-    super
-
-    tank.remove(self, @body)
-    tank.remove(self, @shape)
-
-    nil
-  end
-
-  def sync
-    @drawable.position = (mid - @shape.radius).sf
-  end
-
-  # Returns a sample [0; 1] from this cell's entropy device.
-  def entropy
-    return 0.0 if @tanks.empty?
-
-    mean = 0.0
-
-    @tanks.each do |tank|
-      mean += tank.entropy(mid)
-    end
-
-    mean / @tanks.size
-  end
-
-  def smack(other : Entity, in tank : Tank)
-  end
-end
-
-class RoundEntity < PhysicalEntity
-  def self.body
-    moment = CP::Circle.moment(mass, 0.0, radius)
-
-    CP::Body.new(mass, moment)
-  end
-
-  def self.shape(body : CP::Body)
-    shape = CP::Circle.new(body, radius)
-    shape.friction = friction
-    shape.elasticity = elasticity
-    shape
-  end
-
-  def self.drawable(color : SF::Color)
-    drawable = SF::CircleShape.new
-    drawable.radius = radius
-    drawable.fill_color = color
-    drawable
-  end
-
-  ANGLES = {0, 45, 90, 135, 180, 225, 270, 315}
-
-  # jitter: willingness to change elevation [0; 1]
-  property jitter = 0.0
-
-  # Amount of jitter ascent (0.0 = descent, 1.0 = ascent).
-  property jascent = 0.0
-
-  def tick(delta : Float, in tank : Tank)
-    super
-
-    return if @jitter.zero?
-
-    entropies = ANGLES.map { |angle| {angle, tank.entropy(mid + self.class.radius + angle.dir * self.class.radius)} }
-
-    min_hdg, _ = entropies.min_by { |angle, entropy| entropy }
-    max_hdg, _ = entropies.max_by { |angle, entropy| entropy }
-
-    #
-    # Compute weighed mean to get heading
-    #
-    ascent_w = @jascent
-    descent_w = 1 - @jascent
-
-    sines = 0
-    cosines = 0
-
-    sines += ascent_w * Math.sin(Math.radians(max_hdg))
-    cosines += ascent_w * Math.cos(Math.radians(max_hdg))
-
-    sines += descent_w * Math.sin(Math.radians(min_hdg))
-    cosines += descent_w * Math.cos(Math.radians(min_hdg))
-
-    heading = Math.degrees(Math.atan2(sines, cosines))
-
-    #
-    # Compute flow vector and flow scale.
-    #
-
-    flow_vec = heading.dir
-    flow_scale = fmagn_to_flow_scale(velocity.zero? ? 10 * @jitter : velocity.magn)
-    flow_scale_max = 13.572
-    flow_scale_norm = flow_scale / flow_scale_max
-
-    @body.velocity += (flow_vec * flow_scale).cp * @jitter
-  end
-
-  def self.radius
-    4
-  end
-end
-
-class Vesicle < RoundEntity
   def initialize(
     @message : Message,
     impulse : Vector2,
@@ -375,14 +139,8 @@ class Vesicle < RoundEntity
     1
   end
 
-  def self.drawable(color : SF::Color)
-    drawable = super
-    drawable.point_count = 5
-    drawable
-  end
-
-  def decay
-    @tt.progress(@decay_task_id)
+  def jangles
+    {0, 90, 180, 270}
   end
 
   def message
@@ -419,6 +177,12 @@ class Vesicle < RoundEntity
 
   def smack(other : Cell, in tank : Tank)
     other.receive(self, tank)
+  end
+
+  def draw(target : SF::RenderTarget, in tank : Tank)
+    vary = SF::VertexArray.new(SF::Points, 1)
+    vary.append SF::Vertex.new(mid.sfi, @color)
+    target.draw(vary)
   end
 end
 
@@ -523,7 +287,9 @@ alias Memorable = OwnedProtocol | PackedProtocol | MemorableValue
 class CommitSuicide < Exception
 end
 
-class Cell < RoundEntity
+class Cell < CircularEntity
+  include Jitter
+  include Drawable
   include Inspectable
 
   class InstanceMemory
@@ -551,24 +317,30 @@ class Cell < RoundEntity
 
   @wires = Set(Wire).new
 
-  def initialize
-    super(self.class.color, lifespan: nil)
+  def initialize(color : SF::Color, @protocols : ProtocolCollection, editor : CellEditor, @relatives : Array(Cell))
+    super(color, lifespan: nil)
 
-    @protocols = ProtocolCollection.new
+    @drawable = SF::CircleShape.new
+    @drawable.fill_color = @color
+    @drawable.radius = self.class.radius
 
-    @relatives = [] of Cell
-
-    @editor = CellEditor.new
+    @editor = editor
     @editor.append(@protocols)
 
     @relatives << self
   end
 
-  def initialize(color : SF::Color, @protocols : ProtocolCollection, editor : CellEditor, @relatives : Array(Cell))
-    super(color, lifespan: nil)
+  def initialize
+    initialize(
+      color: self.class.color,
+      protocols: ProtocolCollection.new,
+      editor: CellEditor.new,
+      relatives: [] of Cell
+    )
+  end
 
-    @editor = CellEditor.new
-    @editor.append(@protocols)
+  def jangles
+    {0, 45, 90, 135, 180, 225, 270, 315}
   end
 
   def each_owned_protocol_with_name
@@ -588,9 +360,7 @@ class Cell < RoundEntity
   end
 
   def copy
-    copy = Cell.new(@color, @protocols, @editor, @relatives)
-    @relatives << copy
-    copy
+    Cell.new(@color, @protocols, CellEditor.new, @relatives)
   end
 
   def self.radius
@@ -826,8 +596,10 @@ class Cell < RoundEntity
 
   @__texture = SF::RenderTexture.new(600, 400)
 
-  def draw(tank : Tank, target)
-    super
+  def draw(target : SF::RenderTarget, in tank : Tank)
+    @drawable.position = (mid - Cell.radius).sfi
+
+    target.draw(@drawable)
 
     return unless role = inspection_role? in: tank
 
@@ -885,14 +657,20 @@ class Cell < RoundEntity
   end
 end
 
-class Vein < PhysicalEntity
+class Vein < MorphEntity
+  include Drawable
+
   def initialize
     super(SF::Color.new(0xE5, 0x73, 0x73, 0x33), lifespan: nil)
+
+    @drawable = SF::RectangleShape.new
+    @drawable.position = 0.at(0).sf
+    @drawable.size = width.at(height).sf
+    @drawable.fill_color = @color
   end
 
-  def self.body
-    body = CP::Body.new_static
-    body
+  def self.body : CP::Body
+    CP::Body.new_static
   end
 
   def self.width
@@ -903,7 +681,7 @@ class Vein < PhysicalEntity
     720
   end
 
-  def self.shape(body : CP::Body)
+  def self.shape(body : CP::Body) : CP::Shape
     shape = CP::Shape::Poly.new(body, [
       CP.v(body.position.x, height),
       CP.v(width, height),
@@ -915,15 +693,12 @@ class Vein < PhysicalEntity
     shape
   end
 
-  def self.drawable(color : SF::Color)
-    drawable = SF::RectangleShape.new
-    drawable.position = 0.at(0).sf
-    drawable.size = width.at(height).sf
-    drawable.fill_color = color
-    drawable
+  def width : Number
+    self.class.width
   end
 
-  def sync
+  def height : Number
+    self.class.height
   end
 
   def emit(keyword : String, args : Array(Memorable), color : SF::Color)
@@ -938,10 +713,14 @@ class Vein < PhysicalEntity
       @tanks.each &.distribute_vein_bi(mid + 0.at(yoffset), message, color, 400.milliseconds)
     end
   end
+
+  def draw(target : SF::RenderTarget, in tank : Tank)
+    target.draw(@drawable)
+  end
 end
 
 class Wire < Entity
-  private getter drawable : SF::VertexArray
+  include Drawable
 
   def initialize(@src : Cell, @dst : Vector2)
     super(@src.halo_color, lifespan: nil)
@@ -955,10 +734,6 @@ class Wire < Entity
     -1
   end
 
-  def includes?(other : Vector2)
-    false
-  end
-
   def sync
     @drawable = SF::VertexArray.new(SF::Lines)
     @drawable.append(SF::Vertex.new(@src.mid.sf, @color))
@@ -966,9 +741,11 @@ class Wire < Entity
   end
 
   def distribute(message : Message, color : SF::Color)
-    @tanks.each do |tank|
-      tank.distribute(@dst, message, color, deadzone: 1)
-    end
+    @tanks.each &.distribute(@dst, message, color, deadzone: 1)
+  end
+
+  def draw(target : SF::RenderTarget, in tank : Tank)
+    target.draw(@drawable)
   end
 end
 
@@ -1026,10 +803,10 @@ class Tank
     @entropy = OpenSimplexNoise.new
     @stime = 1i64
 
-    @tt = TimeTable.new(App.time)
+    @watch = TimeTable.new(App.time)
 
     # Generate milliseconds between 0..2000 based on turbulence.
-    @scatterer = @tt.every(((1 - self.class.turbulence) * 2000).milliseconds) do
+    @scatterer = @watch.every(((1 - self.class.turbulence) * 2000).milliseconds) do
       @stime += 1
     end
 
@@ -1221,7 +998,7 @@ class Tank
   end
 
   def tick(delta : Float)
-    @tt.tick
+    @watch.tick
     @space.step(delta)
 
     each_entity &.tick(delta, in: self)
@@ -1249,22 +1026,49 @@ class Tank
   @emap_hash : UInt64?
   @emap_time = 0
 
+  @vesicles_texture = SF::RenderTexture.new
+  @vesicles_hash : UInt64?
+
   def draw(what : Symbol, target : SF::RenderTarget)
     case what
     when :entities
+      view = target.view
+
+      top_left = view.center - SF.vector2f(view.size.x/2, view.size.y/2)
+      bot_right = top_left + view.size
+      extent = bot_right - top_left
+
+      vesicles_hash = {top_left, bot_right}.hash
+
+      unless vesicles_hash == @vesicles_hash
+        # Recreate vesicles texture if size changed. Become the
+        # same size as target.
+        @vesicles_texture.create(extent.x.to_i, extent.y.to_i)
+      end
+
+      @vesicles_hash = vesicles_hash
+      @vesicles_texture.view = view
+      @vesicles_texture.clear(SF::Color.new(0x21, 0x21, 0x21, 0))
+
       #
       # Draw entities ordered by their z index.
       #
       each_entity_by_z_index do |entity|
         next if entity == @inspecting
 
-        entity.draw(self, target)
+        entity.draw(entity.is_a?(Vesicle) ? @vesicles_texture : target, in: self)
       end
+
+      @vesicles_texture.display
+
+      sprite = SF::Sprite.new(@vesicles_texture.texture)
+      sprite.position = top_left
+      target.draw(sprite)
 
       # Then draw the inspected entity. This is done so that
       # the inspected entity is in front, that is, drawn on
       # top of everything else.
-      @inspecting.try &.draw(self, target)
+      @inspecting.try &.draw(target, in: self)
 
       target.draw(self)
     when :entropy
@@ -1519,7 +1323,7 @@ class Mode::Normal < Mode
       return self
     end
 
-    @elevated.try &.stop
+    @elevated.try &.halt
     @elevated = nil
 
     @ondrop
@@ -2010,9 +1814,7 @@ class App
 
   def initialize
     @editor = SF::RenderTexture.new(1280, 720, settings: SF::ContextSettings.new(depth: 24, antialiasing: 8))
-    @editor.smooth = false
     @hud = SF::RenderTexture.new(1280, 720, settings: SF::ContextSettings.new(depth: 24, antialiasing: 8))
-    @hud.smooth = false
 
     @editor_window = SF::RenderWindow.new(SF::VideoMode.new(1280, 720), title: "Synapse — Editor",
       settings: SF::ContextSettings.new(depth: 24, antialiasing: 8)
@@ -2322,6 +2124,11 @@ end
 #     to another file
 # [x] use fixed zoom steps for text rendering without fp errors
 # [x] move protocol, rule, signatures to a different file
+# [x] make entity#drawable and entity#drawing stuff a module rather
+#     than what comes when subclassing eg entity or physical entity.
+#     this puts a huge restriction on what and how we can draw
+# [x] represent vesicles using one SF::Points vertex (at least try
+#     and see if it improves performance)
 # [ ] isolate protocol, rule, signatures
 # [ ] add heartbeatresponsecontext, attack there is circmean attacks
 #     weighted by amount (group attack angles by proximity, at
@@ -2332,11 +2139,6 @@ end
 #     represented by two circles "regions" at both ends connected by a 1px line
 # [ ] add "sink" messages which store the last received message
 #     and answer after N millis
-# [ ] make entity#drawable and entity#drawing stuff a module rather
-#     than what comes when subclassing eg entity or physical entity.
-#     this puts a huge restriction on what and how we can draw
-# [ ] represent vesicles using one SF::Points vertex (at least try
-#     and see if it improves performance)
 # [ ] -refactor- WIPE OUT event+mode system. use something simple eg event
 #     streams; have better focus (mouse follows focus but some things e.g.
 #     editor can seize it)

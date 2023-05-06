@@ -38,7 +38,7 @@ class EntityCollection
 
   # Inserts *entity* into this collection.
   def insert(entity : Entity)
-    entity.insert_into(self)
+    entity.insert(into: self)
   end
 
   # Deletes *entity* of *type* with the given *id*  from
@@ -49,7 +49,7 @@ class EntityCollection
 
   # Deletes *entity* from this collection.
   def delete(entity : Entity)
-    entity.delete_from(self)
+    entity.delete(from: self)
   end
 
   # Yields all entities in this collection.

@@ -1,0 +1,97 @@
+# Entity is the base class of all that "exists" and can "die"
+# in the Synapse world, implicitly or explicitly -- that is,
+# with or without a "body", "shape", or an "image" that the
+# user can see or interact with.
+#
+# Notably, all entities have a color and a globally unique ID.
+# The latter is the only thing that actually differentiates
+# entities under the hood.
+abstract class Entity
+  @decay : UUID
+
+  def initialize(@color : SF::Color, lifespan : Time::Span?)
+    # Unique ID of this entity.
+    #
+    # All entities (including vesicles!) have a unique ID so
+    # that the system can address them.
+    @id = UUID.random
+
+    # Tanks that this entity is part of.
+    @tanks = [] of Tank
+
+    # This entity's personal clock.
+    @watch = TimeTable.new(App.time)
+
+    return unless lifespan
+
+    # Remember the decay task id so that users can query it.
+    #
+    # Commit suicide after we're past the desired lifespan.
+    @decay = @watch.after(lifespan) do
+      @tanks.each { |tank| suicide(in: tank) }
+    end
+  end
+
+  # Specifies the z-index of this kind of entity, that is, how
+  # it should be drawn in relation to other entities on the Z
+  # axis (i.e. above or below or on the same level).
+  def self.z_index
+    0
+  end
+
+  # Specifies the z-index of this particular entity.
+  #
+  # See `Entity.z_index`.
+  def z_index
+    self.class.z_index
+  end
+
+  # Returns a float [0; 1] describing how close this entity
+  # is to death (e.g. 0 means it's newborn, and 1 means it's
+  # about to die).
+  def decay
+    @watch.progress(@decay)
+  end
+
+  # Spawns this entity in *tank*.
+  #
+  # Be careful not to call this method if this entity is already
+  # in *tank*.
+  def summon(in tank : Tank)
+    @tanks << tank
+
+    tank.insert(self)
+
+    nil
+  end
+
+  # Removes this entity from *tank*.
+  #
+  # Be careful not to call this method if this entity is not
+  # in *tank*.
+  def suicide(in tank : Tank)
+    @tanks.delete(tank)
+
+    tank.remove(self)
+
+    nil
+  end
+
+  # Inserts this entity into the given *collection*.
+  def insert(*, into collection : EntityCollection)
+    collection.insert(self.class, @id, entity: self)
+  end
+
+  # Removes this entity from the given *collection*.
+  def delete(*, from collection : EntityCollection)
+    collection.delete(self.class, @id, entity: self)
+  end
+
+  # Progresses this entity in time in the given *tank*.
+  def tick(delta : Float, in tank : Tank)
+    @watch.tick
+  end
+
+  # Two entities are equal when their IDs are equal.
+  def_equals_and_hash @id
+end

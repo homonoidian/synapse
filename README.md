@@ -1,5 +1,11 @@
 # Synapse
 
+<img src="res/randomTug.gif" alt="Cell tugging another cell without intent" align=right>
+
+Synapse is an environment for emergence-oriented and reaction-oriented programming.
+
+---
+
 Read the horrible first draft dot pdf to learn more but beware this thing may
 die any moment.
 
