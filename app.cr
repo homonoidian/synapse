@@ -2116,6 +2116,8 @@ class App
   end
 
   def unzoom
+    @zoom = ZOOMS.index!(1.0)
+
     setzoom(1.0)
   end
 
