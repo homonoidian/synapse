@@ -1,95 +1,112 @@
-abstract struct ExpressionResult
-end
-
-record OkResult < ExpressionResult
-record ErrResult < ExpressionResult, error : Lua::LuaError | ArgumentError, rule : Rule do
-  def index
-    rule.index
+struct Time::Span
+  def clone
+    self
   end
 end
 
-# Raised when a receiver cell wants to commit suicide.
-class CommitSuicide < Exception
+class SF::Clock
+  def clone # Crap crap crap. Refer to FIXME (1) in this file (a bit below).
+    self
+  end
 end
 
-# Rules are named bit of computer code, in Synapse of Lua code.
-abstract class Rule
-  def initialize(@lua : Excerpt)
-  end
-
-  def index
-    @lua.start
+struct UUID # Crap crap crap. Crap!
+  def clone
+    self
   end
 end
 
 abstract class RuleSignature
 end
 
-class KeywordRuleSignature < RuleSignature
-  getter keyword, arity
-
-  def initialize(@keyword : String, @arity : Int32)
-  end
-
-  def_equals_and_hash keyword, arity
-end
-
 class HeartbeatRuleSignature < RuleSignature
-  getter period
+  getter? period : Time::Span?
 
   def initialize(@period : Time::Span?)
   end
 
-  def_equals_and_hash period
-end
-
-class WildcardSignature < RuleSignature
-  getter arity
-
-  def initialize(@arity : Int32)
+  def matches?(message : Message)
+    false
   end
 
-  def_equals_and_hash arity
+  def append_rule(code : String, into editor : CellEditor)
+    state = HeartbeatRuleEditorState.new
+
+    if period = @period
+      header = state.selected # Rule header
+      header.split(backwards: false)
+      header.selected.insert("#{period.total_milliseconds.to_i}ms")
+    end
+
+    unless code.empty?
+      state.split(backwards: false)
+      state.selected.selected.insert(code)
+    end
+
+    rule = HeartbeatRuleEditor.new(state, HeartbeatRuleEditorView.new)
+    editor.append(rule)
+
+    rule
+  end
+
+  def_clone
+end
+
+class KeywordRuleSignature < RuleSignature
+  def initialize(@keyword : String, @params : Array(String))
+  end
+
+  def matches?(message : Message)
+    @keyword == message.keyword && @params.size == message.args.size
+  end
+
+  def append_rule(code : String, into editor : CellEditor)
+    state = KeywordRuleEditorState.new
+
+    header = state.selected # Rule header
+    header.selected.insert(@keyword)
+
+    @params.each do |param|
+      header.split(backwards: false)
+      header.selected.insert(param)
+    end
+
+    unless code.empty?
+      state.split(backwards: false)
+      state.selected.selected.insert(code)
+    end
+
+    rule = KeywordRuleEditor.new(state, KeywordRuleEditorView.new)
+    editor.append(rule)
+
+    rule
+  end
+
+  def_clone
+end
+
+abstract class Rule
+  def initialize(@code : String)
+  end
+
+  def matches?(message : Message)
+    false
+  end
 end
 
 class BirthRule < Rule
-  def result(receiver : Cell, message : Message)
-  end
-
-  def signature(*, to signatures)
-  end
-
-  def update(for cell : Cell, newer : BirthRule)
-    return self if same?(newer)
-    return self if @lua == newer.@lua
-
-    tmp = @lua
-
-    @lua = newer.@lua
-
-    # may happen if meaningless characters were added
-    unless tmp.string == @lua.string
-      express(cell)
-    end
-
-    self
-  end
-
-  def express(receiver : Cell)
-    # on-birth must be rerun for every copy separately!
-    receiver.each_relative do |cell|
-      cell.interpret result(cell)
-    end
+  def express(receiver : Cell, in tank : Tank)
+    receiver.interpret(result(receiver), in: tank)
   end
 
   def result(receiver : Cell) : ExpressionResult
     stack = Lua::Stack.new
 
-    res = ExpressionContext.new(receiver)
+    res = BirthExpressionContext.new(receiver)
     res.fill(stack)
 
     begin
-      stack.run(@lua.string, "birth")
+      stack.run(@code, "birth")
 
       OkResult.new
     rescue e : Lua::LuaError
@@ -100,53 +117,67 @@ class BirthRule < Rule
       stack.close
     end
   end
+
+  def append(into editor : CellEditor)
+    state = BirthRuleEditorState.new
+    state.code?.try &.insert(@code)
+    rule = BirthRuleEditor.new(state, BirthRuleEditorView.new)
+    editor.append(rule)
+
+    rule
+  end
+
+  def_clone
 end
 
-class KeywordRule < Rule
-  getter keyword
-
-  def initialize(@keyword : Excerpt, @params : Array(Excerpt), lua : Excerpt)
-    super(lua)
-
-    @id = UUID.random
+abstract class SignatureRule < Rule
+  def initialize(@signature : RuleSignature, code)
+    super(code)
   end
 
-  def bounds
-    @keyword.start..@lua.end
+  def matches?(message : Message)
+    @signature.matches?(message)
   end
 
-  def header_start
-    @keyword.start
+  def append(into editor : CellEditor)
+    @signature.append_rule(@code, into: editor)
   end
+end
 
+abstract struct ExpressionResult
+end
+
+record OkResult < ExpressionResult
+record ErrResult < ExpressionResult, error : Lua::LuaError | ArgumentError, rule : Rule do
   def index
-    @keyword.start
+    rule.index
   end
+end
 
-  def signature(*, to signatures)
-    signatures << signature
-  end
+module RuleExpressibleFromVesicle
+  abstract def express(receiver : Cell, vesicle : Vesicle, in tank : Tank)
+  abstract def matches?(vesicle : Vesicle) : Bool
+end
 
-  def signature
-    if keyword.string == "*"
-      WildcardSignature.new(@params.size)
-    else
-      KeywordRuleSignature.new(@keyword.string, @params.size)
-    end
+class KeywordRule < SignatureRule
+  include RuleExpressibleFromVesicle
+
+  def matches?(vesicle : Vesicle) : Bool
+    @signature.matches?(vesicle.message)
   end
 
   def result(receiver : Cell, message : Message, attack = 0.0) : ExpressionResult
     stack = Lua::Stack.new
 
-    res = MessageExpressionContext.new(receiver, message, attack)
-    res.fill(stack)
+    ctx = MessageExpressionContext.new(receiver, message, attack)
+    ctx.fill(stack)
 
-    @params.zip(message.args) do |param, arg|
-      stack.set_global(param.string, arg)
+    @signature.as(KeywordRuleSignature).@params.zip(message.args) do |param, arg|
+      stack.set_global(param, arg)
     end
 
     begin
-      stack.run(@lua.string, @keyword.string)
+      stack.run(@code, @signature.as(KeywordRuleSignature).@keyword)
       result = OkResult.new
     rescue e : Lua::LuaError
       result = ErrResult.new(e, self)
@@ -157,44 +188,27 @@ class KeywordRule < Rule
     end
   end
 
-  def changed
-  end
-
-  def update(for cell : Cell, newer : KeywordRule)
-    return newer unless @keyword == newer.@keyword
-    return self if self == newer
-
-    @params = newer.@params
-    @lua = newer.@lua
-    @id = UUID.random
-    changed
-
-    self
-  end
-
-  def express(receiver : Cell, vesicle : Vesicle, attack : Float64)
+  def express(receiver : Cell, vesicle : Vesicle, in tank : Tank)
+    # Attack is a heading pointing towards the vesicle.
+    delta = (vesicle.mid - receiver.mid)
+    attack = Math.atan2(-delta.y, delta.x)
     result = result(receiver, vesicle.message, attack)
-    receiver.interpret(result)
+    receiver.interpret(result, in: tank)
   end
 
-  def_equals_and_hash @id
+  def_clone
 end
 
-class HeartbeatRule < KeywordRule
-  def initialize(keyword : Excerpt, lua : Excerpt, @period : Time::Span?)
-    super(keyword, [] of Excerpt, lua)
+class HeartbeatRule < SignatureRule
+  def initialize(signature, code)
+    super
 
-    @clock = SF::Clock.new
-  end
+    @clock = SF::Clock.new # FIXME (1): THIS DOES NOT BELONG HERE!!!
 
-  def signature
-    HeartbeatRuleSignature.new(@period)
-  end
-
-  @corrupt = false
-
-  def changed
-    @corrupt = false
+    # NOTE: (1) This should be managed by a Heart object which a Cell owns!
+    #           Heart could listen to changes in ProtocolCollection and traverse
+    #           the heartbeat rules accordingly -- ask each HeartbeatRule to add
+    #           itself with the expected period
   end
 
   # Returns the amount of *pending* lapses for this heartbeat
@@ -212,12 +226,12 @@ class HeartbeatRule < KeywordRule
 
   # Systole is the "body" of a cell's heartbeat: at systole,
   # heartbeat rules are triggered.
-  def systole(for receiver : Cell)
+  def systole(for receiver : Cell, in tank : Tank)
     # If heartbeat message was decided corrupt, then it shall
     # not be run.
     return if @corrupt
 
-    if period = @period
+    if period = @signature.as(HeartbeatRuleSignature).period?
       return unless count = lapses(period)
     else
       count = 1
@@ -237,7 +251,7 @@ class HeartbeatRule < KeywordRule
       res.fill(stack)
 
       begin
-        stack.run(@lua.string, "heartbeat:#{@period}")
+        stack.run(@code, "heartbeat:#{period}")
         result = OkResult.new
       rescue e : Lua::LuaError
         result = ErrResult.new(e, self)
@@ -250,103 +264,333 @@ class HeartbeatRule < KeywordRule
       @corrupt = result.is_a?(ErrResult)
     end
 
-    result
+    receiver.interpret(result, in: tank)
   end
 
   # Dyastole resets heartbeat rules.
-  def dyastole(for receiver : Cell)
-    return unless period = @period
+  def dyastole(for receiver : Cell, in tank : Tank)
+    return unless period = @signature.as(HeartbeatRuleSignature).period?
     return unless lapses(period)
 
     @clock.restart
   end
+
+  def_clone
 end
 
 class Protocol
+  getter? enabled : Bool
+
+  def initialize(@uid : UUID, @name : String?, @enabled : Bool)
+    @rules = [] of Rule
+  end
+
+  # Enables this protocol.
+  def enable
+    @enabled = true
+  end
+
+  # Disables this protocol.
+  def disable
+    @enabled = false
+  end
+
+  # Toggles this protocol on/off.
+  def toggle
+    @enabled = !@enabled
+  end
+
+  # Yields rules in this protocol.
+  def each_rule(&)
+    @rules.each do |rule|
+      yield rule
+    end
+  end
+
+  # Yields heartbeat rules in this protocol.
+  def each_heartbeat(&)
+    each_rule do |rule|
+      next unless rule.is_a?(HeartbeatRule)
+      yield rule
+    end
+  end
+
+  # Yields birth rules in this protocol.
+  def each_birth_rule(&)
+    each_rule do |rule|
+      next unless rule.is_a?(BirthRule)
+      yield rule
+    end
+  end
+
+  # Yields all rules that are expressible from and match the given *vesicle*.
+  def each_rule_matching(vesicle : Vesicle, &)
+    each_rule do |rule|
+      next unless rule.is_a?(RuleExpressibleFromVesicle)
+      next unless rule.matches?(vesicle)
+      yield rule
+    end
+  end
+
+  # Adds *rule* to this protocol.
+  def append(rule : Rule)
+    @rules << rule
+  end
+
+  # Adds this protocol to *collection*.
+  def append(*, into collection : ProtocolCollection)
+    collection.assign(@uid, self)
+  end
+
+  def append(*, into collection : ProtocolsByName)
+    return unless name = @name
+
+    if set = collection[name]?
+      set << self
+    else
+      collection[name] = Set{self}
+    end
+  end
+
+  def append(*, into editor : CellEditor)
+    #
+    # Create and append a protocol editor.
+    #
+    state = ProtocolEditorState.new(@uid, @enabled)
+    if name = @name
+      state.selected.insert(name)
+    end
+
+    protocol = ProtocolEditor.new(state, ProtocolEditorView.new)
+
+    editor.append(protocol)
+
+    #
+    # Create and append rule editors.
+    #
+    each_rule do |rule|
+      appended = rule.append(into: editor)
+
+      editor.connect(protocol, appended)
+    end
+  end
+
+  def_equals_and_hash @uid
+  def_clone
+end
+
+alias ProtocolsByName = Hash(String, Set(Protocol))
+
+class ProtocolCollection
   def initialize
-    @rules = {} of RuleSignature => KeywordRule
-    @birth = BirthRule.new(Excerpt.new("", 0))
+    @protocols = {} of UUID => Protocol
+    @protocols_by_name = ProtocolsByName.new
   end
 
-  private def each_birth_rule
-    if birth = @birth
-      yield birth
+  # Returns the protocol with the given *id*, or nil.
+  def []?(id : UUID) : Protocol?
+    @protocols[id]?
+  end
+
+  # Yields each protocol in this collection regardless of whether it
+  # is enabled.
+  def each_protocol(&)
+    @protocols.each_value do |protocol|
+      yield protocol
     end
   end
 
-  def each_keyword_rule # FIXME: make this private, currently ProtocolEditor needs this
-    @rules.each_value do |kwrule|
-      yield kwrule
+  # Yields currently enabled protocols.
+  def each_enabled_protocol(&)
+    each_protocol do |protocol|
+      next unless protocol.enabled?
+      yield protocol
     end
   end
 
-  private def each_heartbeat_rule
-    @rules.each_value do |rule|
-      yield rule if rule.is_a?(HeartbeatRule)
-    end
-  end
-
-  private def fetch?(signature : RuleSignature)
-    @rules[signature]?.try { |rule| yield rule }
-  end
-
-  private def fetch?(signature : KeywordRuleSignature)
-    @rules[signature]?.try { |rule| yield rule }
-    @rules[WildcardSignature.new(signature.arity)]?.try { |rule| yield rule }
-  end
-
-  def on_memory_changed(cell : Cell)
-    each_heartbeat_rule &.changed
-  end
-
-  def systole(cell : Cell, tank : Tank)
-    each_heartbeat_rule do |hb|
-      result = hb.systole(for: cell)
-      if result.is_a?(ErrResult)
-        cell.fail(result, in: tank)
+  # Yields each named protocol followed by its name regardless of whether
+  # it is enabled.
+  def each_named_protocol(&)
+    @protocols_by_name.each do |name, protocols|
+      protocols.each do |protocol|
+        yield protocol, name
       end
     end
   end
 
-  def dyastole(cell : Cell, tank : Tank)
-    each_heartbeat_rule &.dyastole(for: cell)
-  end
-
-  def update(for cell : Cell, newer : KeywordRule) # FIXME: callers shoudn't be aware of rules!
-    fetch?(newer.signature) do |prev|
-      @rules[newer.signature] = prev.update(cell, newer)
-      return
-    end
-
-    @rules[newer.signature] = newer
-  end
-
-  def update(for cell : Cell, newer : BirthRule) # FIXME: callers shoudn't be aware of rules!
-    @birth = @birth.update(cell, newer)
-  end
-
-  def rewrite(signatures : Set(RuleSignature)) # FIXME: callers shoudn't be aware of rule signatures!
-    new_rules = {} of RuleSignature => KeywordRule
-
-    # Get rid of those decls that are not in the signatures set.
-    signatures.each do |signature|
-      new_rules[signature] = @rules[signature]
-    end
-
-    @rules = new_rules
-  end
-
-  def express(receiver : Cell, vesicle : Vesicle)
-    fetch?(KeywordRuleSignature.new(vesicle.keyword, vesicle.nargs)) do |rule|
-      # Attack is a heading pointing hdg the vesicle.
-      delta = (vesicle.mid - receiver.mid)
-      attack = Math.atan2(-delta.y, delta.x)
-
-      rule.express(receiver, vesicle, attack)
+  # Yields each currently enabled named protocol followed by its name.
+  def each_enabled_named_protocol(&)
+    each_named_protocol do |protocol, name|
+      next unless protocol.enabled?
+      yield protocol, name
     end
   end
 
-  def born(receiver : Cell)
-    @birth.express(receiver)
+  # Expresses rules matching *vesicle* in all enabled protocols.
+  #
+  # *receiver* is the receiver cell of expression.
+  #
+  # *tank* is the tank where *receiver* and *vesicle* reside.
+  #
+  # See `Protocol#express`.
+  def express(receiver : Cell, vesicle : Vesicle, in tank : Tank)
+    each_enabled_protocol &.each_rule_matching(vesicle, &.express(receiver, vesicle, in: tank))
+  end
+
+  # Expresses birth rules in all enabled protocols.
+  #
+  # *receiver* is the receiver cell of expression.
+  #
+  # *tank* is the tank where the *receiver* cell was born.
+  def born(receiver : Cell, in tank : Tank)
+    each_enabled_protocol &.each_birth_rule(&.express(receiver, in: tank))
+  end
+
+  @_systole_heartbeats = [] of HeartbeatRule
+
+  # Expresses heartbeat rules in all enabled protocols.
+  #
+  # *receiver* is the receiver cell of expression.
+  #
+  # *tank* is the tank where *receiver* resides.
+  def systole(receiver : Cell, in tank : Tank)
+    @_systole_heartbeats.clear
+
+    each_enabled_protocol do |protocol|
+      protocol.each_heartbeat do |heartbeat|
+        # To make sure a dyastole() is run only for, and for all systole()d
+        # heartbeat rules, we have to store the heartbeat rules we systole()d
+        # so as to dyastole() them later.
+        @_systole_heartbeats << heartbeat
+
+        heartbeat.systole(for: receiver, in: tank)
+      end
+    end
+  end
+
+  # Cleans up after heartbeat rules were run in `systole`.
+  #
+  # *receiver* is the receiver cell for which `systole` was run already.
+  #
+  # *tank* is the tank where *receiver* resides.
+  def dyastole(receiver : Cell, in tank : Tank)
+    @_systole_heartbeats.each &.dyastole(for: receiver, in: tank)
+    @_systole_heartbeats.clear
+  end
+
+  # Invoked when instance memory of *receiver* changes.
+  def on_memory_changed(receiver : Cell)
+  end
+
+  # Appends the given *protocol* to this collection.
+  def summon(protocol : Protocol)
+    protocol.append(into: self)
+  end
+
+  # Adds *protocol* to this collection, assigning it the given *id*.
+  #
+  # Will overwrite the protocol with the same id, if any.
+  def assign(id : UUID, protocol : Protocol)
+    @protocols[id] = protocol
+    protocol.append(into: @protocols_by_name)
+    protocol
+  end
+
+  def append(*, into editor : CellEditor)
+    each_protocol &.append(into: editor)
+  end
+end
+
+# Owned protocols are Lua references to protocols during rule
+# expression, namely to protocols that the receiver cell *owns*,
+# and therefore can control.
+class OwnedProtocol
+  include LuaCallable
+
+  def initialize(@name : String, @protocol : Protocol)
+  end
+
+  # Returns the name of this protocol.
+  #
+  # Synopsis:
+  #
+  # * `OP.name` where *OP* is the owned protocol.
+  def name
+    @name
+  end
+
+  # Enables this protocol.
+  #
+  # Synopsis:
+  #
+  # * `OP.enable` where *OP* is the owned protocol.
+  def enable
+    @protocol.enable
+  end
+
+  # Disables this protocol.
+  #
+  # Synopsis:
+  #
+  # * `OP.disable` where *OP* is the owned protocol.
+  def disable
+    @protocol.disable
+  end
+
+  # Toggles this protocol on/off.
+  #
+  # Synopsis:
+  #
+  # * `OP.toggle` where *OP* is the owned protocol.
+  def toggle
+    @protocol.toggle
+  end
+
+  # Switches this protocol on/off depending on *state*.
+  #
+  # `true` means this protocol is going to be enabled.
+  # `false` means this protocol is going to be disabled.
+  #
+  # Synopsis:
+  #
+  # * `OP.switch(state : boolean)` where *OP* is the owned protocol.
+  def switch(state : Bool)
+    state ? enable : disable
+  end
+
+  # For internal use only (not accessible from Lua).
+  #
+  # Clones the underlying protocol object, and returns the `PackedProtocol`
+  # which wraps the clone.
+  def _pack
+    PackedProtocol.new(@name, @protocol.clone)
+  end
+end
+
+# Packed protocols are Lua references to protocols coming from/
+# packaged in messages.
+#
+# They are already have no connection with the sender. They
+# require the receiver cell to `adhere(packed protocol)` to
+# them explicitly.
+class PackedProtocol
+  include LuaCallable
+
+  def initialize(@name : String, @protocol : Protocol)
+  end
+
+  # Returns the name of the underlying protocol.
+  #
+  # Synopsis:
+  #
+  # * `PP.name` where *PP* is the packed protocol of interest.
+  def name
+    @name
+  end
+
+  # Asks *receiver* to accept this packed protocol, that is,
+  # to start adhering to it.
+  def _accept(receiver : Cell)
+    receiver.accept(@protocol)
   end
 end

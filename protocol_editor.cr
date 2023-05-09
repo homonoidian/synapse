@@ -55,7 +55,12 @@ class ProtocolEditorState < InputFieldRowState
   def protocol_from(collection : ProtocolCollection)
     name = @states[0].as(ProtocolNameEditorState).string
 
-    collection.summon(@id, name, @enabled)
+    unless protocol = collection[@id]?
+      protocol = Protocol.new(@id, name, @enabled)
+      collection.summon(protocol)
+    end
+
+    protocol
   end
 
   def new_substate_for(index : Int)

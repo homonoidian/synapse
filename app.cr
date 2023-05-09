@@ -34,7 +34,7 @@ require "./view"
 require "./controller"
 require "./buffer_editor"
 require "./expression_context"
-# require "./protocol"
+require "./protocol"
 require "./entity_collection"
 require "./ped2"
 
@@ -186,100 +186,6 @@ class Vesicle < CircularEntity
   end
 end
 
-# Owned protocols are Lua references to protocols during rule
-# expression, namely to protocols that the receiver cell *owns*,
-# and therefore can control.
-class OwnedProtocol
-  include LuaCallable
-
-  def initialize(@name : String, @protocol : Protocol)
-  end
-
-  # Returns the name of this protocol.
-  #
-  # Synopsis:
-  #
-  # * `OP.name` where *OP* is the owned protocol.
-  def name
-    @name
-  end
-
-  # Enables this protocol.
-  #
-  # Synopsis:
-  #
-  # * `OP.enable` where *OP* is the owned protocol.
-  def enable
-    @protocol.enable
-  end
-
-  # Disables this protocol.
-  #
-  # Synopsis:
-  #
-  # * `OP.disable` where *OP* is the owned protocol.
-  def disable
-    @protocol.disable
-  end
-
-  # Toggles this protocol on/off.
-  #
-  # Synopsis:
-  #
-  # * `OP.toggle` where *OP* is the owned protocol.
-  def toggle
-    @protocol.toggle
-  end
-
-  # Switches this protocol on/off depending on *state*.
-  #
-  # `true` means this protocol is going to be enabled.
-  # `false` means this protocol is going to be disabled.
-  #
-  # Synopsis:
-  #
-  # * `OP.switch(state : boolean)` where *OP* is the owned protocol.
-  def switch(state : Bool)
-    state ? enable : disable
-  end
-
-  # For internal use only (not accessible from Lua).
-  #
-  # Clones the underlying protocol object, and returns the `PackedProtocol`
-  # which wraps the clone.
-  def _pack
-    PackedProtocol.new(@name, @protocol.clone)
-  end
-end
-
-# Packed protocols are Lua references to protocols coming from/
-# packaged in messages.
-#
-# They are already have no connection with the sender. They
-# require the receiver cell to `adhere(packed protocol)` to
-# them explicitly.
-class PackedProtocol
-  include LuaCallable
-
-  def initialize(@name : String, @protocol : Protocol)
-  end
-
-  # Returns the name of the underlying protocol.
-  #
-  # Synopsis:
-  #
-  # * `PP.name` where *PP* is the packed protocol of interest.
-  def name
-    @name
-  end
-
-  # Asks *receiver* to accept this packed protocol, that is,
-  # to start adhering to it.
-  def _accept(receiver : Cell)
-    receiver.accept(@protocol)
-  end
-end
-
 alias MemorableValue = Bool | Float64 | Lua::Table | String | Nil
 alias Memorable = OwnedProtocol | PackedProtocol | MemorableValue
 
@@ -344,7 +250,7 @@ class Cell < CircularEntity
   end
 
   def each_owned_protocol_with_name
-    @protocols.each_protocol_with_name do |protocol, name|
+    @protocols.each_named_protocol do |protocol, name|
       yield OwnedProtocol.new(name, protocol), name
     end
   end
@@ -451,16 +357,6 @@ class Cell < CircularEntity
     view
   end
 
-  def switch(protocol : String, state : Bool)
-    @protocols.each_protocol_by_name(protocol) do |protocol|
-      state ? protocol.enable : protocol.disable
-    end
-  end
-
-  def prn(message : String)
-    @tanks.each &.prn(self, message)
-  end
-
   def swim(heading : Float64, speed : Float64)
     @body.velocity = (Math.radians(heading).dir * 1.at(-1) * speed).cp
   end
@@ -493,15 +389,13 @@ class Cell < CircularEntity
     end
   end
 
-  def interpret(result : ExpressionResult)
+  def interpret(result : ExpressionResult, in tank : Tank)
     unless result.is_a?(ErrResult)
       self.sync = true
       return
     end
 
-    @tanks.each do |tank|
-      fail(result, tank)
-    end
+    fail(result, tank)
   end
 
   def replicate
@@ -528,7 +422,7 @@ class Cell < CircularEntity
   end
 
   def receive(vesicle : Vesicle, in tank : Tank)
-    @protocols.express(receiver: self, vesicle: vesicle)
+    @protocols.express(receiver: self, vesicle: vesicle, in: tank)
   rescue CommitSuicide
     suicide(in: tank)
   end
@@ -1260,8 +1154,8 @@ class Mode::Normal < Mode
       app.tank.distribute(coords, Message.new(
         keyword: "mouse",
         args: [] of Memorable,
-        strength: (@clicks == 2 ? 250 : 130)
-      ), SF::Color::White, deadzone: 1)
+        strength: @clicks == 2 ? 250 : 130
+      ), SF::Color.new(*(@clicks == 2 ? {0xf7, 0x9b, 0x98} : {0xc1, 0x6b, 0x69})), deadzone: 1)
     end
 
     self
@@ -1835,10 +1729,6 @@ class App
   def coords(event)
     coords = @editor.map_pixel_to_coords SF.vector2f(event.x, event.y)
     coords.x.at(coords.y)
-  end
-
-  def prn(chars : String)
-    @scene_window_buffer.string += chars
   end
 
   def pan(delta : Vector2)
