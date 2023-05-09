@@ -30,9 +30,7 @@ development_dependencies:
 
 targets:
   synapse:
-    main: app.cr
-  protocol-editor-prototype:
-    main: ped2.cr
+    main: src/synapse.cr
 #   webmock:
 #     github: manastech/webmock.cr
 
