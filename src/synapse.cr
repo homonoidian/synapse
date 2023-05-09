@@ -45,10 +45,13 @@ end
 require "./synapse/ext"
 
 require "./synapse/util/*"
+require "./synapse/system/lens"
 require "./synapse/system/entity"
 require "./synapse/system/physical_entity"
 require "./synapse/system/morph_entity"
+require "./synapse/system/circular_entity"
 require "./synapse/system/*"
+
 require "./synapse/ui/view"
 require "./synapse/ui/dimension"
 require "./synapse/ui/controller"
@@ -83,568 +86,15 @@ FONT.get_texture(11).smooth = false
 FONT_BOLD.get_texture(11).smooth = false
 FONT_ITALIC.get_texture(11).smooth = false
 
-# https://www.desmos.com/calculator/bk3g3l6txg
-def fmessage_amount(strength : Float)
-  if strength <= 80
-    1.8256 * Math.log(strength)
-  elsif strength <= 150
-    6/1225 * (strength - 80)**2 + 8
-  else
-    8 * Math.log(strength - 95.402)
-  end
-end
-
-def fmessage_amount_to_strength(amount : Float)
-  if amount < 8
-    Math::E**((625 * amount)/1141)
-  elsif amount < 32
-    (35 * Math.sqrt(amount - 8))/Math.sqrt(6) + 80
-  else
-    Math::E**(amount/8) + 47701/500
-  end
-end
-
-def fmessage_lifespan_ms(strength : Float)
-  if strength <= 155
-    2000 * Math::E**(-strength/60)
-  elsif strength <= 700
-    Math::E**(strength/100) + 146
-  else
-    190 * Math.log(strength)
-  end
-end
-
-def fmessage_lifespan_ms_to_strength(lifespan_ms : Float)
-  if lifespan_ms <= 151
-    60 * Math.log(2000/lifespan_ms)
-  elsif lifespan_ms <= 1242
-    100 * Math.log(lifespan_ms - 146)
-  else
-    Math::E**(lifespan_ms/190)
-  end
-end
-
-def fmagn_to_flow_scale(magn : Float)
-  if 3.684 <= magn
-    50/magn
-  elsif magn > 0
-    magn**2
-  else
-    0
-  end
-end
-
-def fmessage_strength_to_jitter(strength : Float)
-  if strength.in?(0.0..1000.0)
-    1 - (1/1000 * strength**2)/1000
-  else
-    0.0
-  end
-end
-
-record Message, keyword : String, args : Array(Memorable)
-
-class Vesicle < CircularEntity
-  include Jitter
-  include SF::Drawable
-
-  # Returns the message transported by this vesicle.
-  getter message : Message
-
-  # Returns the strength with which this vesicle was emitted.
-  getter strength : Float64
-
-  def initialize(
-    tank : Tank,
-    @message : Message,
-    angle_rad : Float,
-    @strength : Float64,
-    lifespan : Time::Span,
-    color : SF::Color,
-    @birth : Time::Span,
-    randomize = true
-  )
-    super(tank, color, lifespan)
-
-    impulse = angle_rad.dir * (randomize ? (10.0..100.0).sample : strength) # FIXME: should depend on strength
-
-    @body.apply_impulse_at_local_point(impulse.cp, CP.v(0, 0))
-  end
-
-  def self.z_index
-    1
-  end
-
-  def jangles
-    {0, 90, 180, 270}
-  end
-
-  def self.radius
-    0.5
-  end
-
-  def self.mass
-    0.5
-  end
-
-  def self.friction
-    0.7
-  end
-
-  def self.elasticity
-    1.0
-  end
-
-  def tick(delta : Float)
-    @jitter = fmessage_strength_to_jitter(@strength * (1 - decay))
-
-    super
-  end
-
-  def smack(other : CellAvatar)
-    other.receive(self)
-  end
-
-  def draw(target : SF::RenderTarget, states : SF::RenderStates)
-    vary = SF::VertexArray.new(SF::Points, 1)
-    vary.append SF::Vertex.new(mid.sfi, @color)
-    vary.draw(target, states)
-  end
-end
-
-alias MemorableValue = Bool | Float64 | Lua::Table | String | Nil
-alias Memorable = OwnedProtocol | PackedProtocol | MemorableValue
-
-# Raised when a receiver cell wants to commit suicide.
-class CommitSuicide < Exception
-end
-
-# An instance of a `Cell` inside a specific tank.
-#
-# Cells can "live" in multiple tanks simultaneously, that is, with their
-# "brains" "floating in the sky". *Instances* (so-called cell avatars)
-# then communicate back and forth with the "brains" to remember decisions,
-# swim, and so on.
-class CellAvatar < CircularEntity
-  include SF::Drawable
-
-  include Jitter
-  include Inspectable
-
-  property? sync = true
-
-  @wires = Set(Wire).new
-
-  def initialize(tank : Tank, @cell : Cell, color : SF::Color, @editor : CellEditor)
-    super(tank, color, lifespan: nil)
-
-    @drawable = SF::CircleShape.new
-    @drawable.fill_color = @color
-    @drawable.radius = self.class.radius
-  end
-
-  def initialize(tank : Tank, cell : Cell)
-    initialize(tank, cell,
-      color: self.class.color,
-      editor: CellEditor.new,
-    )
-  end
-
-  delegate :memory, :adhere, :each_owned_protocol_with_name, to: @cell
-
-  def jangles
-    {0, 45, 90, 135, 180, 225, 270, 315}
-  end
-
-  def point_in_editor?(point : Vector2)
-    origin = (mid + 32.at(32))
-    corner = origin + Vector2.new(@editor.size)
-    origin.x <= point.x <= corner.x && origin.y <= point.y <= corner.y
-  end
-
-  def self.radius
-    8
-  end
-
-  def self.mass
-    100000.0 # TODO: WTF
-  end
-
-  SWATCH = (0..360).cycle.step(24)
-
-  # Returns a random color.
-  def self.color(l = 40, c = 50)
-    hue = SWATCH.next
-    until rand < 0.5
-      hue = SWATCH.next
-    end
-
-    SF::Color.new *LCH.lch2rgb(l, c, hue.as(Int32))
-  end
-
-  def halo_color
-    l, c, h = LCH.rgb2lch(@color.r, @color.g, @color.b)
-
-    SF::Color.new(*LCH.lch2rgb(80, 50, h))
-  end
-
-  def mid=(other : Vector2)
-    super
-    @wires.each &.sync
-  end
-
-  enum IRole
-    Main
-    Relative
-  end
-
-  def inspection_role?(is role : IRole? = nil) : IRole?
-    @cell.each_relative_avatar do |relative|
-      next unless @tank.inspecting?(relative)
-
-      relative_role = same?(relative) ? IRole::Main : IRole::Relative
-      if role.nil? || relative_role == role
-        return relative_role
-      end
-    end
-
-    nil
-  end
-
-  def into(view : SF::View) : SF::View
-    return view unless inspection_role? is: IRole::Main
-
-    top_left = view.center - SF.vector2f(view.size.x/2, view.size.y/2)
-    bot_right = top_left + view.size
-
-    dx = 0
-    dy = 0
-
-    origin = @drawable.position - SF.vector2f(CellAvatar.radius, CellAvatar.radius)
-    corner = editor_position + @editor.size + SF.vector2f(CellAvatar.radius, CellAvatar.radius)
-    extent = corner - origin
-
-    if view.size.x < extent.x || view.size.y < extent.y
-      # Give up: object doesn't fit into the view.
-      return view
-    end
-
-    if origin.x < top_left.x # Cell is to the left of the view
-      dx = origin.x - top_left.x
-    elsif bot_right.x < corner.x # Cell is to the right of the view
-      dx = corner.x - bot_right.x
-    end
-
-    if origin.y < top_left.y # Cell is above the view
-      dy = origin.y - top_left.y
-    elsif bot_right.y < corner.y # Cell is below the view
-      dy = corner.y - bot_right.y
-    end
-
-    return view if dx.zero? && dy.zero?
-
-    new_top_left = SF.vector2f(top_left.x + dx, top_left.y + dy)
-
-    view.center = new_top_left + view.size/2
-    view
-  end
-
-  def swim(heading : Float64, speed : Float64)
-    @body.velocity = (Math.radians(heading).dir * 1.at(-1) * speed).cp
-  end
-
-  def add_wire(wire : Wire)
-    @wires << wire
-  end
-
-  def emit(keyword : String, strength : Float64, color : SF::Color)
-    emit(keyword, [] of Memorable, strength, color)
-  end
-
-  def emit(keyword : String, args : Array(Memorable), strength : Float64, color : SF::Color)
-    message = Message.new(
-      keyword: keyword,
-      args: args
-    )
-
-    @wires.each do |wire|
-      wire.distribute(message, color, strength)
-    end
-
-    @tank.distribute(mid, message, color, strength)
-  end
-
-  def interpret(result : ExpressionResult)
-    unless result.is_a?(ErrResult)
-      self.sync = true
-      return
-    end
-
-    fail(result)
-  end
-
-  def replicate(to coords = mid)
-    replica = CellAvatar.new(@tank, @cell.copy, @color, CellEditor.new)
-    replica.mid = coords
-    replica.summon
-    replica
-  end
-
-  def summon
-    super
-
-    @cell.born(avatar: self)
-
-    nil
-  end
-
-  def suicide
-    super
-
-    @cell.died(avatar: self)
-
-    nil
-  end
-
-  def receive(vesicle : Vesicle)
-    @cell.receive(avatar: self, vesicle: vesicle)
-  rescue CommitSuicide
-    suicide
-  end
-
-  def fail(err : ErrResult)
-    # On error, if nothing is being inspected, ask tank to
-    # start inspecting myself.
-    #
-    # In any case, add a mark to where the Lua code of the
-    # declaration starts.
-    @tank.inspect(self) if @tank.inspecting?(nil)
-
-    # Signal that what's currently running is out of sync from
-    # what's being shown.
-    self.sync = false
-
-    puts "=== Avatar #{@id} OF Cell #{@cell.id} failed: ===".colorize.bold
-    pp err # FIXME: Uhmmm maybe have a better way to signal error???
-  end
-
-  def handle(event)
-    @editor.handle(event)
-  end
-
-  def editor_position
-    (mid + 32.at(32)).sfi
-  end
-
-  def focus
-    @editor = @cell.to_editor
-  end
-
-  def blur
-    @cell.adhere(@editor.to_protocol_collection)
-
-    # FIXME: hack: Rerun birth rules unconditionally. But this
-    # should happen only if they changed!
-    @cell.born(avatar: self)
-  end
-
-  # Prefer using `Tank` to calling this method yourself because
-  # sync of systoles/dyastoles between relatives is unsupported.
-  def systole
-    @cell.systole(avatar: self)
-  rescue CommitSuicide
-    suicide
-  end
-
-  # :ditto:
-  def dyastole
-    @cell.dyastole(avatar: self)
-  rescue CommitSuicide
-    suicide
-  end
-
-  @__texture = SF::RenderTexture.new(600, 400)
-
-  def draw(target : SF::RenderTarget, states : SF::RenderStates)
-    @drawable.position = (mid - CellAvatar.radius).sf
-    @drawable.draw(target, states)
-
-    return unless role = inspection_role?
-
-    #
-    # Draw halo
-    #
-    halo = SF::CircleShape.new
-    halo.radius = CellAvatar.radius * 1.15
-    halo.position = (mid - halo.radius).sf
-    halo.fill_color = SF::Color::Transparent
-    halo.outline_color = SF::Color.new(halo_color.r, halo_color.g, halo_color.b, 0x88)
-    halo.outline_thickness = 1.5
-    target.draw(halo)
-
-    if role.main?
-      sync_color = sync? ? SF::Color.new(0x81, 0xD4, 0xFA, 0x88) : SF::Color.new(0xEF, 0x9A, 0x9A, 0x88)
-      sync_color_opaque = SF::Color.new(sync_color.r, sync_color.g, sync_color.b)
-
-      #
-      # Draw little circles at start of line to really show
-      # which cell is selected.
-      #
-      start_circle = SF::CircleShape.new(radius: 2)
-      start_circle.fill_color = sync_color_opaque
-      start_circle.position = (mid - 2).sfi
-      target.draw(start_circle)
-
-      #
-      # Draw background rectangle.
-      #
-      bg_rect = SF::RectangleShape.new
-      bg_rect.fill_color = sync_color
-      bg_rect.position = editor_position - SF.vector2(3, 1)
-      bg_rect.size = @editor.size + SF.vector2f(4, 2)
-      target.draw(bg_rect)
-
-      #
-      # Draw a line from origin of background to the center of
-      # the cell.
-      #
-      va = SF::VertexArray.new(SF::Lines, 2)
-      va.append(SF::Vertex.new(mid.sfi, sync_color_opaque))
-      va.append(SF::Vertex.new(bg_rect.position, sync_color_opaque))
-      target.draw(va)
-
-      @__texture.clear(SF::Color.new(0x25, 0x25, 0x25))
-      @__texture.draw(@editor)
-      @__texture.display
-
-      sprite = SF::Sprite.new(@__texture.texture)
-      sprite.position = editor_position
-
-      target.draw(sprite)
-    end
-  end
-end
-
-class Vein < MorphEntity
-  include SF::Drawable
-
-  def initialize(tank : Tank)
-    super(tank, SF::Color.new(0xE5, 0x73, 0x73, 0x33), lifespan: nil)
-
-    @drawable = SF::RectangleShape.new
-    @drawable.position = 0.at(0).sf
-    @drawable.size = width.at(height).sf
-    @drawable.fill_color = @color
-  end
-
-  def self.body : CP::Body
-    CP::Body.new_static
-  end
-
-  def self.width
-    10
-  end
-
-  def self.height
-    720
-  end
-
-  def self.shape(body : CP::Body) : CP::Shape
-    shape = CP::Shape::Poly.new(body, [
-      CP.v(body.position.x, height),
-      CP.v(width, height),
-      CP.v(width, body.position.y),
-      body.position,
-    ])
-    shape.friction = friction
-    shape.elasticity = elasticity
-    shape
-  end
-
-  def width : Number
-    self.class.width
-  end
-
-  def height : Number
-    self.class.height
-  end
-
-  def emit(keyword : String, args : Array(Memorable), color : SF::Color)
-    message = Message.new(
-      keyword: keyword,
-      args: args,
-    )
-
-    # Distribute at each 5th heightpoint.
-    0.step(to: self.class.height, by: 10) do |yoffset|
-      @tank.distribute_vein_bi(mid + yoffset.y, message, color, 400.milliseconds, strength: 50.0)
-    end
-  end
-
-  def draw(target : SF::RenderTarget, states : SF::RenderStates)
-    @drawable.draw(target, states)
-  end
-end
-
-class Wire < Entity
-  include SF::Drawable
-
-  def initialize(tank : Tank, @src : CellAvatar, @dst : Vector2)
-    super(tank, @src.halo_color, lifespan: nil)
-
-    @drawable = SF::VertexArray.new(SF::Lines)
-    @drawable.append(SF::Vertex.new(@src.mid.sf, @color))
-    @drawable.append(SF::Vertex.new(@dst.sf, @color))
-  end
-
-  def self.z_index
-    -1
-  end
-
-  def sync
-    @drawable = SF::VertexArray.new(SF::Lines)
-    @drawable.append(SF::Vertex.new(@src.mid.sf, @color))
-    @drawable.append(SF::Vertex.new(@dst.sf, @color))
-  end
-
-  def distribute(message : Message, color : SF::Color, strength : Float)
-    @tank.distribute(@dst, message, color, strength, deadzone: 1)
-  end
-
-  def draw(target : SF::RenderTarget, states : SF::RenderStates)
-    @drawable.draw(target, states)
-  end
-end
-
-class Tank
-  class TankDispatcher < CP::CollisionHandler
-    def initialize(@tank : Tank)
-      super()
-    end
-
-    def begin(arbiter : CP::Arbiter, space : CP::Space)
-      ba, bb = arbiter.bodies
-
-      return true unless a = @tank.find_entity_by_body?(ba)
-      return true unless b = @tank.find_entity_by_body?(bb)
-
-      a.smack(b)
-      b.smack(a)
-
-      true
-    end
-  end
-
+class World < Tank
   @scatterer : UUID
 
   def initialize
-    @space = CP::Space.new
+    super
+
     @space.use_spatial_hash(dim: 4, count: 4096)
     @space.damping = 0.3
     @space.gravity = CP.v(0, 0)
-
-    @entities = EntityCollection.new
-    @bodies = {} of UInt64 => PhysicalEntity
 
     @entropy = OpenSimplexNoise.new
     @stime = 1i64
@@ -655,10 +105,6 @@ class Tank
     @scatterer = @watch.every(((1 - self.class.turbulence) * 2000).milliseconds) do
       @stime += 1
     end
-
-    dispatcher = TankDispatcher.new(self)
-
-    @space.add_collision_handler(dispatcher)
   end
 
   # Turbulence factor [0; 1] determines how often entropy time is incremented.
@@ -668,54 +114,28 @@ class Tank
     0.4
   end
 
-  @lens : Lens = Lens::Blurred.new
-
-  def inspecting?(object : Inspectable?)
-    @lens.aiming_at?(object)
+  def clock_authority
+    App.time # TODO: make this actually an independent authority -- no App.time!
   end
 
   def inspect(object : Inspectable?)
-    @lens = @lens.focus(object)
+    super
+
+    object ? App.the.stop_time : App.the.start_time
   end
 
-  def handle(event : SF::Event)
-    @lens.forward(event)
+  def print(string : String)
+    Console::INSTANCE.print(string)
   end
 
-  def follow(view : SF::View)
-    @lens.configure(view)
-  end
-
-  def entropy(at pos : Vector2)
-    @entropy.generate(pos.x/100, pos.y/100, @stime/10) * 0.5 + 0.5
+  def entropy(position : Vector2)
+    @entropy.generate(position.x/100, position.y/100, @stime/10) * 0.5 + 0.5
   end
 
   def has_no_cells?
     each_cell { return false }
 
     true
-  end
-
-  def insert(entity : Entity, object : CP::Shape | CP::Body)
-    @space.add(object)
-    if object.is_a?(CP::Body)
-      @bodies[object.object_id] = entity
-    end
-  end
-
-  def insert(entity : Entity)
-    @entities.insert(entity)
-  end
-
-  def remove(entity : Entity, object : CP::Shape | CP::Body)
-    @space.remove(object)
-    if object.is_a?(CP::Body)
-      @bodies.delete(object.object_id)
-    end
-  end
-
-  def remove(entity : Entity)
-    @entities.delete(entity)
   end
 
   def cell(*, to pos : Vector2)
@@ -739,18 +159,6 @@ class Tank
     wire
   end
 
-  def each_entity
-    @entities.each do |entity|
-      yield entity
-    end
-  end
-
-  def each_entity_by_z_index
-    @entities.each_by_z_index do |entity|
-      yield entity
-    end
-  end
-
   def each_cell
     @entities.each(CellAvatar) do |cell|
       yield cell
@@ -763,39 +171,8 @@ class Tank
     end
   end
 
-  def find_entity_by_id?(id : UUID)
-    @entities[id]?
-  end
-
-  def find_entity_by_body?(body : CP::Body)
-    @bodies[body.object_id]?
-  end
-
-  def find_entity_at?(pos : Vector2)
-    @entities.at?(pos)
-  end
-
   def find_cell_at?(pos : Vector2)
     @entities.at?(CellAvatar, pos)
-  end
-
-  def distribute(origin : Vector2, message : Message, color : SF::Color, strength : Float, deadzone = CellAvatar.radius * 1.2)
-    vamt = fmessage_amount(strength)
-
-    return unless vamt.in?(1.0..1024.0) # safety belt
-
-    vrays = Math.max(1, vamt // 2)
-
-    vamt = vamt.to_i
-    vrays = vrays.to_i
-    vlifespan = fmessage_lifespan_ms(strength).milliseconds
-
-    vamt.times do |v|
-      angle = Math.radians(((v / vrays) * 360) + rand * 360)
-      vesicle = Vesicle.new(self, message, angle, strength, vlifespan, color, birth: Time.monotonic)
-      vesicle.mid = origin + (angle.dir * deadzone)
-      vesicle.summon
-    end
   end
 
   def distribute_vein_bi(origin : Vector2, message : Message, color : SF::Color, lifespan : Time::Span, strength : Float)
@@ -816,9 +193,8 @@ class Tank
 
   def tick(delta : Float)
     @watch.tick
-    @space.step(delta)
 
-    each_entity &.tick(delta)
+    super
 
     each_cell &.systole
     each_cell &.dyastole
@@ -830,49 +206,8 @@ class Tank
   @emap_hash : UInt64?
   @emap_time = 0
 
-  @vesicles_texture = SF::RenderTexture.new
-  @vesicles_hash : UInt64?
-
   def draw(what : Symbol, target : SF::RenderTarget)
     case what
-    when :entities
-      view = target.view
-
-      top_left = view.center - SF.vector2f(view.size.x/2, view.size.y/2)
-      bot_right = top_left + view.size
-      extent = bot_right - top_left
-
-      vesicles_hash = {top_left, bot_right}.hash
-
-      unless vesicles_hash == @vesicles_hash
-        # Recreate vesicles texture if size changed. Become the
-        # same size as target.
-        @vesicles_texture.create(extent.x.to_i, extent.y.to_i)
-      end
-
-      @vesicles_hash = vesicles_hash
-      @vesicles_texture.view = view
-      @vesicles_texture.clear(SF::Color.new(0x21, 0x21, 0x21, 0))
-
-      #
-      # Draw entities ordered by their z index.
-      #
-      each_entity_by_z_index do |entity|
-        next if @lens.aiming_at?(entity)
-
-        (entity.is_a?(Vesicle) ? @vesicles_texture : target).draw(entity)
-      end
-
-      @vesicles_texture.display
-
-      sprite = SF::Sprite.new(@vesicles_texture.texture)
-      sprite.position = top_left
-      target.draw(sprite)
-
-      # Then draw the inspected entity. This is done so that
-      # the inspected entity is in front, that is, drawn on
-      # top of everything else.
-      @lens.each { |entity| target.draw(entity) }
     when :entropy
       #
       # Draw jitter map for the visible area.
@@ -926,6 +261,8 @@ class Tank
       sprite = SF::Sprite.new(@emap.texture)
       sprite.position = top_left
       target.draw(sprite)
+    else
+      super
     end
   end
 end
@@ -1635,7 +972,7 @@ class App
 
     @scene_window.framerate_limit = 60
 
-    @tank = Tank.new
+    @tank = World.new
     @tt = TimeTable.new(App.time)
 
     @console = Console::INSTANCE

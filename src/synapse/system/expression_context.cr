@@ -331,7 +331,7 @@ class ExpressionContext
       arg.nil? ? "nil" : arg
     end
 
-    Console::INSTANCE.print string
+    @receiver.print(string)
 
     1
   end

@@ -16,6 +16,15 @@ struct UUID # Crap crap crap. Crap!
   end
 end
 
+record Message, keyword : String, args : Array(Memorable)
+
+alias MemorableValue = Bool | Float64 | Lua::Table | String | Nil
+alias Memorable = OwnedProtocol | PackedProtocol | MemorableValue
+
+# Raised when a receiver cell wants to commit suicide.
+class CommitSuicide < Exception
+end
+
 abstract class RuleSignature
 end
 

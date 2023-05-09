@@ -17,7 +17,7 @@ abstract class Entity
     @id = UUID.random
 
     # This entity's personal clock.
-    @watch = TimeTable.new(App.time)
+    @watch = TimeTable.new(@tank.clock_authority)
 
     return unless lifespan
 
