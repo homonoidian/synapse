@@ -1,5 +1,7 @@
 # Synapse
 
+**IMPORTANT**: if you want to see progress please go to the [new-ui-integr branch](https://github.com/homonoidian/synapse/tree/new-ui-integr)
+
 ![A TOTALLY USELESS 1MIN GIF](./totallyUseless.gif)
 
 Read the horrible first draft dot pdf to learn more but beware this thing may
