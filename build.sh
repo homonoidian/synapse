@@ -1,2 +1,2 @@
 #!/bin/bash
-shards build -Dpreview_mt --release --link-flags "-L$(pwd)"
+shards build synapse -Dpreview_mt --release --link-flags "-L$(pwd)" --no-debug
