@@ -11,8 +11,8 @@ abstract class MorphEntity < PhysicalEntity
 
   @shape : CP::Shape
 
-  def initialize(color : SF::Color, lifespan : Time::Span?)
-    super(color, lifespan)
+  def initialize(tank : Tank, color : SF::Color, lifespan : Time::Span?)
+    super(tank, color, lifespan)
 
     @shape = self.class.shape(@body)
   end
@@ -27,18 +27,18 @@ abstract class MorphEntity < PhysicalEntity
     0.4
   end
 
-  def summon(in tank : Tank)
+  def summon
     super
 
-    tank.insert(self, @shape)
+    @tank.insert(self, @shape)
 
     nil
   end
 
-  def suicide(in tank : Tank)
+  def suicide
     super
 
-    tank.remove(self, @shape)
+    @tank.remove(self, @shape)
 
     nil
   end

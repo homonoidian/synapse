@@ -1,5 +1,5 @@
-# Synapse cells express rules in response to various signals coming
-# from the environment or from within themselves.
+# Synapse cells (`CellAvatar`s to be precise) express rules in response
+# to various signals coming from the environment or from within themselves.
 #
 # Rules are named bits of Lua. In order to give those bits *indirect*
 # control over various properties of the receiver cell, `ExpressionContext`
@@ -7,7 +7,7 @@
 # another to what the receiver cell will do, or have had observed using
 # one of its devices.
 class ExpressionContext
-  def initialize(@receiver : Cell)
+  def initialize(@receiver : CellAvatar)
     @strength = 120.0
     @random = Random::PCG32.new(Time.local.to_unix.to_u64!)
   end
@@ -242,7 +242,7 @@ class ExpressionContext
   #
   # * `die()`
   def die(state : LibLua::State)
-    # Longjump (sort of) to Cell#receive, systole(), dyastole(),
+    # Longjump (sort of) to CellAvatar#receive, systole(), dyastole(),
     # and friends.
     raise CommitSuicide.new
 
@@ -298,7 +298,7 @@ class ExpressionContext
       raise Lua::RuntimeError.new("send(keyword): keyword must be a string")
     end
 
-    @receiver.emit(keyword, args, @strength, color: Cell.color(l: 80, c: 70))
+    @receiver.emit(keyword, args, @strength, color: CellAvatar.color(l: 80, c: 70))
 
     1
   end
@@ -352,7 +352,7 @@ class ExpressionContext
       raise Lua::RuntimeError.new("adhere(protocol): expected protocol to be a packed protocol")
     end
 
-    protocol._accept(@receiver)
+    protocol._adhere(@receiver)
 
     1
   end
@@ -413,21 +413,23 @@ class BirthExpressionContext < ExpressionContext
 end
 
 # Subclass of `ExpressionContext` specifically for when the receiver
-# cell is expressing due to a message from the environment rather
+# cell is expressing due to a vesicle from the environment rather
 # than e.g. at heartbeat or at birth.
 #
-# Exposes some information about the message itself.
-class MessageExpressionContext < ExpressionContext
-  def initialize(receiver : Cell, @message : Message, @attack = 0.0)
+# Exposes some information about the message and vesicle itself.
+class VesicleExpressionContext < ExpressionContext
+  def initialize(receiver : CellAvatar, @vesicle : Vesicle, @attack = 0.0)
     super(receiver)
+
+    @message = @vesicle.message
   end
 
   def fill(stack : Lua::Stack)
     super
 
     stack.set_global("keyword", @message.keyword)
-    stack.set_global("impact", @message.strength)
-    stack.set_global("decay", @message.decay)
+    stack.set_global("impact", @vesicle.strength)
+    stack.set_global("decay", @vesicle.decay)
 
     stack.set_global("attack", Math.degrees(@attack))
     stack.set_global("evasion", Math.degrees(Math.opposite(@attack)))

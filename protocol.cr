@@ -95,11 +95,11 @@ abstract class Rule
 end
 
 class BirthRule < Rule
-  def express(receiver : Cell, in tank : Tank)
-    receiver.interpret(result(receiver), in: tank)
+  def express(receiver : CellAvatar)
+    receiver.interpret(result(receiver))
   end
 
-  def result(receiver : Cell) : ExpressionResult
+  def result(receiver : CellAvatar) : ExpressionResult
     stack = Lua::Stack.new
 
     res = BirthExpressionContext.new(receiver)
@@ -155,7 +155,7 @@ record ErrResult < ExpressionResult, error : Lua::LuaError | ArgumentError, rule
 end
 
 module RuleExpressibleFromVesicle
-  abstract def express(receiver : Cell, vesicle : Vesicle, in tank : Tank)
+  abstract def express(receiver : CellAvatar, vesicle : Vesicle)
   abstract def matches?(vesicle : Vesicle) : Bool
 end
 
@@ -166,13 +166,17 @@ class KeywordRule < SignatureRule
     @signature.matches?(vesicle.message)
   end
 
-  def result(receiver : Cell, message : Message, attack = 0.0) : ExpressionResult
+  def result(receiver : CellAvatar, vesicle : Vesicle) : ExpressionResult
+    # Attack is a heading pointing towards the vesicle.
+    delta = (vesicle.mid - receiver.mid)
+    attack = Math.atan2(-delta.y, delta.x)
+
     stack = Lua::Stack.new
 
-    ctx = MessageExpressionContext.new(receiver, message, attack)
+    ctx = VesicleExpressionContext.new(receiver, vesicle, attack)
     ctx.fill(stack)
 
-    @signature.as(KeywordRuleSignature).@params.zip(message.args) do |param, arg|
+    @signature.as(KeywordRuleSignature).@params.zip(vesicle.message.args) do |param, arg|
       stack.set_global(param, arg)
     end
 
@@ -188,12 +192,8 @@ class KeywordRule < SignatureRule
     end
   end
 
-  def express(receiver : Cell, vesicle : Vesicle, in tank : Tank)
-    # Attack is a heading pointing towards the vesicle.
-    delta = (vesicle.mid - receiver.mid)
-    attack = Math.atan2(-delta.y, delta.x)
-    result = result(receiver, vesicle.message, attack)
-    receiver.interpret(result, in: tank)
+  def express(receiver : CellAvatar, vesicle : Vesicle)
+    receiver.interpret(result(receiver, vesicle))
   end
 
   def_clone
@@ -205,7 +205,7 @@ class HeartbeatRule < SignatureRule
 
     @clock = SF::Clock.new # FIXME (1): THIS DOES NOT BELONG HERE!!!
 
-    # NOTE: (1) This should be managed by a Heart object which a Cell owns!
+    # NOTE: (1) This should be managed by a Heart object which a CellAvatar owns!
     #           Heart could listen to changes in ProtocolCollection and traverse
     #           the heartbeat rules accordingly -- ask each HeartbeatRule to add
     #           itself with the expected period
@@ -226,7 +226,7 @@ class HeartbeatRule < SignatureRule
 
   # Systole is the "body" of a cell's heartbeat: at systole,
   # heartbeat rules are triggered.
-  def systole(for receiver : Cell, in tank : Tank)
+  def systole(for receiver : CellAvatar)
     # If heartbeat message was decided corrupt, then it shall
     # not be run.
     return if @corrupt
@@ -264,11 +264,11 @@ class HeartbeatRule < SignatureRule
       @corrupt = result.is_a?(ErrResult)
     end
 
-    receiver.interpret(result, in: tank)
+    receiver.interpret(result)
   end
 
   # Dyastole resets heartbeat rules.
-  def dyastole(for receiver : Cell, in tank : Tank)
+  def dyastole(for receiver : CellAvatar)
     return unless period = @signature.as(HeartbeatRuleSignature).period?
     return unless lapses(period)
 
@@ -430,20 +430,16 @@ class ProtocolCollection
   #
   # *receiver* is the receiver cell of expression.
   #
-  # *tank* is the tank where *receiver* and *vesicle* reside.
-  #
   # See `Protocol#express`.
-  def express(receiver : Cell, vesicle : Vesicle, in tank : Tank)
-    each_enabled_protocol &.each_rule_matching(vesicle, &.express(receiver, vesicle, in: tank))
+  def express(receiver : CellAvatar, vesicle : Vesicle)
+    each_enabled_protocol &.each_rule_matching(vesicle, &.express(receiver, vesicle))
   end
 
   # Expresses birth rules in all enabled protocols.
   #
   # *receiver* is the receiver cell of expression.
-  #
-  # *tank* is the tank where the *receiver* cell was born.
-  def born(receiver : Cell, in tank : Tank)
-    each_enabled_protocol &.each_birth_rule(&.express(receiver, in: tank))
+  def born(receiver : CellAvatar)
+    each_enabled_protocol &.each_birth_rule(&.express(receiver))
   end
 
   @_systole_heartbeats = [] of HeartbeatRule
@@ -451,9 +447,7 @@ class ProtocolCollection
   # Expresses heartbeat rules in all enabled protocols.
   #
   # *receiver* is the receiver cell of expression.
-  #
-  # *tank* is the tank where *receiver* resides.
-  def systole(receiver : Cell, in tank : Tank)
+  def systole(receiver : CellAvatar)
     @_systole_heartbeats.clear
 
     each_enabled_protocol do |protocol|
@@ -463,7 +457,7 @@ class ProtocolCollection
         # so as to dyastole() them later.
         @_systole_heartbeats << heartbeat
 
-        heartbeat.systole(for: receiver, in: tank)
+        heartbeat.systole(for: receiver)
       end
     end
   end
@@ -471,15 +465,13 @@ class ProtocolCollection
   # Cleans up after heartbeat rules were run in `systole`.
   #
   # *receiver* is the receiver cell for which `systole` was run already.
-  #
-  # *tank* is the tank where *receiver* resides.
-  def dyastole(receiver : Cell, in tank : Tank)
-    @_systole_heartbeats.each &.dyastole(for: receiver, in: tank)
+  def dyastole(receiver : CellAvatar)
+    @_systole_heartbeats.each &.dyastole(for: receiver)
     @_systole_heartbeats.clear
   end
 
   # Invoked when instance memory of *receiver* changes.
-  def on_memory_changed(receiver : Cell)
+  def on_memory_changed(receiver : CellAvatar)
   end
 
   # Appends the given *protocol* to this collection.
@@ -588,9 +580,8 @@ class PackedProtocol
     @name
   end
 
-  # Asks *receiver* to accept this packed protocol, that is,
-  # to start adhering to it.
-  def _accept(receiver : Cell)
-    receiver.accept(@protocol)
+  # Asks *receiver* to adhere to this packed protocol.
+  def _adhere(receiver : CellAvatar)
+    receiver.adhere(@protocol)
   end
 end

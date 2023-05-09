@@ -9,15 +9,12 @@
 abstract class Entity
   @decay : UUID
 
-  def initialize(@color : SF::Color, lifespan : Time::Span?)
+  def initialize(@tank : Tank, @color : SF::Color, lifespan : Time::Span?)
     # Unique ID of this entity.
     #
     # All entities (including vesicles!) have a unique ID so
     # that the system can address them.
     @id = UUID.random
-
-    # Tanks that this entity is part of.
-    @tanks = [] of Tank
 
     # This entity's personal clock.
     @watch = TimeTable.new(App.time)
@@ -27,9 +24,7 @@ abstract class Entity
     # Remember the decay task id so that users can query it.
     #
     # Commit suicide after we're past the desired lifespan.
-    @decay = @watch.after(lifespan) do
-      @tanks.each { |tank| suicide(in: tank) }
-    end
+    @decay = @watch.after(lifespan) { suicide }
   end
 
   # Specifies the z-index of this kind of entity, that is, how
@@ -53,26 +48,20 @@ abstract class Entity
     @watch.progress(@decay)
   end
 
-  # Spawns this entity in *tank*.
+  # Spawns this entity in the tank.
   #
-  # Be careful not to call this method if this entity is already
-  # in *tank*.
-  def summon(in tank : Tank)
-    @tanks << tank
-
-    tank.insert(self)
+  # Be careful not to call this method if this entity is already in the tank.
+  def summon
+    @tank.insert(self)
 
     nil
   end
 
-  # Removes this entity from *tank*.
+  # Removes this entity from the tank.
   #
-  # Be careful not to call this method if this entity is not
-  # in *tank*.
-  def suicide(in tank : Tank)
-    @tanks.delete(tank)
-
-    tank.remove(self)
+  # Be careful not to call this method if this entity is not in the tank.
+  def suicide
+    @tank.remove(self)
 
     nil
   end
@@ -87,8 +76,8 @@ abstract class Entity
     collection.delete(self.class, @id, entity: self)
   end
 
-  # Progresses this entity in time in the given *tank*.
-  def tick(delta : Float, in tank : Tank)
+  # Progresses this entity through time in the tank.
+  def tick(delta : Float)
     @watch.tick
   end
 

@@ -37,6 +37,7 @@ require "./expression_context"
 require "./protocol"
 require "./entity_collection"
 require "./ped2"
+require "./cell"
 
 FONT        = SF::Font.from_memory({{read_file("./fonts/code/scientifica.otb")}}.to_slice)
 FONT_BOLD   = SF::Font.from_memory({{read_file("./fonts/code/scientificaBold.otb")}}.to_slice)
@@ -110,27 +111,33 @@ def fmessage_strength_to_jitter(strength : Float)
 end
 
 module Inspectable
-  abstract def follow(in tank : Tank, view : SF::View) : SF::View
+  abstract def follow(view : SF::View) : SF::View
 end
 
-module Drawable
-  abstract def draw(target : SF::RenderTarget, in tank : Tank)
-end
-
-record Message, keyword : String, args : Array(Memorable), strength : Float64, decay = 0.0
+record Message, keyword : String, args : Array(Memorable)
 
 class Vesicle < CircularEntity
   include Jitter
-  include Drawable
+  include SF::Drawable
+
+  # Returns the message transported by this vesicle.
+  getter message : Message
+
+  # Returns the strength with which this vesicle was emitted.
+  getter strength : Float64
 
   def initialize(
+    tank : Tank,
     @message : Message,
-    impulse : Vector2,
+    angle_rad : Float,
+    @strength : Float64,
     lifespan : Time::Span,
     color : SF::Color,
     @birth : Time::Span
   )
-    super(color, lifespan)
+    super(tank, color, lifespan)
+
+    impulse = angle_rad.dir * (10.0..100.0).sample # FIXME: should depend on strength
 
     @body.apply_impulse_at_local_point(impulse.cp, CP.v(0, 0))
   end
@@ -141,16 +148,6 @@ class Vesicle < CircularEntity
 
   def jangles
     {0, 90, 180, 270}
-  end
-
-  def message
-    @message.copy_with(decay: decay)
-  end
-
-  delegate :keyword, to: @message
-
-  def nargs
-    @message.args.size
   end
 
   def self.radius
@@ -169,20 +166,20 @@ class Vesicle < CircularEntity
     1.0
   end
 
-  def tick(delta : Float, in tank : Tank)
-    @jitter = fmessage_strength_to_jitter(@message.strength * (1 - decay))
+  def tick(delta : Float)
+    @jitter = fmessage_strength_to_jitter(@strength * (1 - decay))
 
     super
   end
 
-  def smack(other : Cell, in tank : Tank)
-    other.receive(self, tank)
+  def smack(other : CellAvatar)
+    other.receive(self)
   end
 
-  def draw(target : SF::RenderTarget, in tank : Tank)
+  def draw(target : SF::RenderTarget, states : SF::RenderStates)
     vary = SF::VertexArray.new(SF::Points, 1)
     vary.append SF::Vertex.new(mid.sfi, @color)
-    target.draw(vary)
+    vary.draw(target, states)
   end
 end
 
@@ -193,80 +190,47 @@ alias Memorable = OwnedProtocol | PackedProtocol | MemorableValue
 class CommitSuicide < Exception
 end
 
-class Cell < CircularEntity
+# An instance of a `Cell` inside a specific tank.
+#
+# Cells can "live" in multiple tanks simultaneously, that is, with their
+# "brains" "floating in the sky". *Instances* (so-called cell avatars)
+# then communicate back and forth with the "brains" to remember decisions,
+# swim, and so on.
+class CellAvatar < CircularEntity
+  include SF::Drawable
+
   include Jitter
-  include Drawable
   include Inspectable
-
-  class InstanceMemory
-    include LuaCallable
-
-    def initialize(@cell : Cell)
-      @store = {} of String => Memorable
-    end
-
-    def _index(key : String)
-      @store[key]?
-    end
-
-    def _newindex(key : String, val : Memorable)
-      @store[key] = val
-      @cell.on_memory_changed
-    end
-  end
-
-  getter memory : InstanceMemory do
-    InstanceMemory.new(self)
-  end
 
   property? sync = true
 
   @wires = Set(Wire).new
 
-  def initialize(color : SF::Color, @protocols : ProtocolCollection, editor : CellEditor, @relatives : Array(Cell))
-    super(color, lifespan: nil)
+  def initialize(tank : Tank, @cell : Cell, color : SF::Color, @editor : CellEditor)
+    super(tank, color, lifespan: nil)
 
     @drawable = SF::CircleShape.new
     @drawable.fill_color = @color
     @drawable.radius = self.class.radius
-
-    @editor = editor
-    @editor.append(@protocols)
-
-    @relatives << self
   end
 
-  def initialize
-    initialize(
+  def initialize(tank : Tank, cell : Cell)
+    initialize(tank, cell,
       color: self.class.color,
-      protocols: ProtocolCollection.new,
       editor: CellEditor.new,
-      relatives: [] of Cell
     )
   end
 
+  delegate :memory, :adhere, :each_owned_protocol_with_name, to: @cell
+
   def jangles
     {0, 45, 90, 135, 180, 225, 270, 315}
-  end
-
-  def each_owned_protocol_with_name
-    @protocols.each_named_protocol do |protocol, name|
-      yield OwnedProtocol.new(name, protocol), name
-    end
-  end
-
-  def accept(protocol : Protocol)
-    @protocols.summon(protocol)
   end
 
   def point_in_editor?(point : Vector2)
     origin = (mid + 32.at(32))
     corner = origin + Vector2.new(@editor.size)
     origin.x <= point.x <= corner.x && origin.y <= point.y <= corner.y
-  end
-
-  def copy
-    Cell.new(@color, @protocols, CellEditor.new, @relatives)
   end
 
   def self.radius
@@ -289,16 +253,15 @@ class Cell < CircularEntity
     SF::Color.new *LCH.lch2rgb(l, c, hue.as(Int32))
   end
 
-  def each_relative
-    @relatives.each do |copy|
-      yield copy
-    end
-  end
-
   def halo_color
     l, c, h = LCH.rgb2lch(@color.r, @color.g, @color.b)
 
     SF::Color.new(*LCH.lch2rgb(80, 50, h))
+  end
+
+  def mid=(other : Vector2)
+    super
+    @wires.each &.sync
   end
 
   enum IRole
@@ -306,9 +269,9 @@ class Cell < CircularEntity
     Relative
   end
 
-  def inspection_role?(in tank : Tank, is role : IRole? = nil) : IRole?
-    each_relative do |relative|
-      next unless tank.inspecting?(relative)
+  def inspection_role?(is role : IRole? = nil) : IRole?
+    @cell.each_relative_avatar do |relative|
+      next unless @tank.inspecting?(relative)
 
       relative_role = same?(relative) ? IRole::Main : IRole::Relative
       if role.nil? || relative_role == role
@@ -319,8 +282,8 @@ class Cell < CircularEntity
     nil
   end
 
-  def follow(in tank : Tank, view : SF::View) : SF::View
-    return view unless inspection_role? in: tank, is: IRole::Main
+  def follow(view : SF::View) : SF::View
+    return view unless inspection_role? is: IRole::Main
 
     top_left = view.center - SF.vector2f(view.size.x/2, view.size.y/2)
     bot_right = top_left + view.size
@@ -328,8 +291,8 @@ class Cell < CircularEntity
     dx = 0
     dy = 0
 
-    origin = @drawable.position - SF.vector2f(Cell.radius, Cell.radius)
-    corner = editor_position + @editor.size + SF.vector2f(Cell.radius, Cell.radius)
+    origin = @drawable.position - SF.vector2f(CellAvatar.radius, CellAvatar.radius)
+    corner = editor_position + @editor.size + SF.vector2f(CellAvatar.radius, CellAvatar.radius)
     extent = corner - origin
 
     if view.size.x < extent.x || view.size.y < extent.y
@@ -365,10 +328,6 @@ class Cell < CircularEntity
     @wires << wire
   end
 
-  def sender_of?(message : Message)
-    message.sender == @id
-  end
-
   def emit(keyword : String, strength : Float64, color : SF::Color)
     emit(keyword, [] of Memorable, strength, color)
   end
@@ -376,69 +335,67 @@ class Cell < CircularEntity
   def emit(keyword : String, args : Array(Memorable), strength : Float64, color : SF::Color)
     message = Message.new(
       keyword: keyword,
-      args: args,
-      strength: strength,
+      args: args
     )
 
     @wires.each do |wire|
-      wire.distribute(message, color)
+      wire.distribute(message, color, strength)
     end
 
-    @tanks.each do |tank|
-      tank.distribute(mid, message, color)
-    end
+    @tank.distribute(mid, message, color, strength)
   end
 
-  def interpret(result : ExpressionResult, in tank : Tank)
+  def interpret(result : ExpressionResult)
     unless result.is_a?(ErrResult)
       self.sync = true
       return
     end
 
-    fail(result, tank)
+    fail(result)
   end
 
-  def replicate
-    replica = copy
-    replica.mid = mid
-
-    @tanks.each do |tank|
-      replica.summon(in: tank)
-    end
+  def replicate(to coords = mid)
+    replica = CellAvatar.new(@tank, @cell.copy, @color, CellEditor.new)
+    replica.mid = coords
+    replica.summon
+    replica
   end
 
-  def summon(*, in tank : Tank)
-    super
-    @protocols.born(self, in: tank)
-    nil
-  end
-
-  def suicide(*, in tank : Tank)
+  def summon
     super
 
-    @relatives.delete(self)
+    @cell.born(avatar: self)
 
     nil
   end
 
-  def receive(vesicle : Vesicle, in tank : Tank)
-    @protocols.express(receiver: self, vesicle: vesicle, in: tank)
+  def suicide
+    super
+
+    @cell.died(avatar: self)
+
+    nil
+  end
+
+  def receive(vesicle : Vesicle)
+    @cell.receive(avatar: self, vesicle: vesicle)
   rescue CommitSuicide
-    suicide(in: tank)
+    suicide
   end
 
-  def fail(err : ErrResult, in tank : Tank)
+  def fail(err : ErrResult)
     # On error, if nothing is being inspected, ask tank to
     # start inspecting myself.
     #
     # In any case, add a mark to where the Lua code of the
     # declaration starts.
-    tank.inspect(self) if tank.inspecting?(nil)
+    @tank.inspect(self) if @tank.inspecting?(nil)
 
     # Signal that what's currently running is out of sync from
     # what's being shown.
     self.sync = false
 
+    puts "=== Avatar #{@id} OF Cell #{@cell.id} failed: ===".colorize.bold
     pp err # FIXME: Uhmmm maybe have a better way to signal error???
   end
 
@@ -450,58 +407,50 @@ class Cell < CircularEntity
     (mid + 32.at(32)).sfi
   end
 
-  def start_inspection?(in tank : Tank)
-    @editor = CellEditor.new
-    @editor.append(@protocols)
+  def start_inspection?
+    @editor = @cell.to_editor
 
     true
   end
 
-  def stop_inspection?(in tank : Tank)
-    @protocols = @editor.to_protocol_collection
+  def stop_inspection?
+    @cell.adhere(@editor.to_protocol_collection)
 
     # FIXME: hack: Rerun birth rules unconditionally. But this
     # should happen only if they changed!
-    @protocols.born(self, in: tank)
+    @cell.born(avatar: self)
 
     true
-  end
-
-  def on_memory_changed
-    # The success of heartbeat rules also depends on the memory.
-    # If memory changed, try to rerun heartbeat rules.
-    @protocols.on_memory_changed(self)
   end
 
   # Prefer using `Tank` to calling this method yourself because
   # sync of systoles/dyastoles between relatives is unsupported.
-  def systole(in tank : Tank)
-    @protocols.systole(self, in: tank)
+  def systole
+    @cell.systole(avatar: self)
   rescue CommitSuicide
-    suicide(in: tank)
+    suicide
   end
 
   # :ditto:
-  def dyastole(in tank : Tank)
-    @protocols.dyastole(self, in: tank)
+  def dyastole
+    @cell.dyastole(avatar: self)
   rescue CommitSuicide
-    suicide(in: tank)
+    suicide
   end
 
   @__texture = SF::RenderTexture.new(600, 400)
 
-  def draw(target : SF::RenderTarget, in tank : Tank)
-    @drawable.position = (mid - Cell.radius).sfi
+  def draw(target : SF::RenderTarget, states : SF::RenderStates)
+    @drawable.position = (mid - CellAvatar.radius).sf
+    @drawable.draw(target, states)
 
-    target.draw(@drawable)
-
-    return unless role = inspection_role? in: tank
+    return unless role = inspection_role?
 
     #
     # Draw halo
     #
     halo = SF::CircleShape.new
-    halo.radius = Cell.radius * 1.15
+    halo.radius = CellAvatar.radius * 1.15
     halo.position = (mid - halo.radius).sf
     halo.fill_color = SF::Color::Transparent
     halo.outline_color = SF::Color.new(halo_color.r, halo_color.g, halo_color.b, 0x88)
@@ -552,10 +501,10 @@ class Cell < CircularEntity
 end
 
 class Vein < MorphEntity
-  include Drawable
+  include SF::Drawable
 
-  def initialize
-    super(SF::Color.new(0xE5, 0x73, 0x73, 0x33), lifespan: nil)
+  def initialize(tank : Tank)
+    super(tank, SF::Color.new(0xE5, 0x73, 0x73, 0x33), lifespan: nil)
 
     @drawable = SF::RectangleShape.new
     @drawable.position = 0.at(0).sf
@@ -599,25 +548,24 @@ class Vein < MorphEntity
     message = Message.new(
       keyword: keyword,
       args: args,
-      strength: 50,
     )
 
     # Distribute at each 5th heightpoint.
     0.step(to: self.class.height, by: 10) do |yoffset|
-      @tanks.each &.distribute_vein_bi(mid + 0.at(yoffset), message, color, 400.milliseconds)
+      @tank.distribute_vein_bi(mid + 0.at(yoffset), message, color, 400.milliseconds, strength: 50.0)
     end
   end
 
-  def draw(target : SF::RenderTarget, in tank : Tank)
-    target.draw(@drawable)
+  def draw(target : SF::RenderTarget, states : SF::RenderStates)
+    @drawable.draw(target, states)
   end
 end
 
 class Wire < Entity
-  include Drawable
+  include SF::Drawable
 
-  def initialize(@src : Cell, @dst : Vector2)
-    super(@src.halo_color, lifespan: nil)
+  def initialize(tank : Tank, @src : CellAvatar, @dst : Vector2)
+    super(tank, @src.halo_color, lifespan: nil)
 
     @drawable = SF::VertexArray.new(SF::Lines)
     @drawable.append(SF::Vertex.new(@src.mid.sf, @color))
@@ -634,12 +582,12 @@ class Wire < Entity
     @drawable.append(SF::Vertex.new(@dst.sf, @color))
   end
 
-  def distribute(message : Message, color : SF::Color)
-    @tanks.each &.distribute(@dst, message, color, deadzone: 1)
+  def distribute(message : Message, color : SF::Color, strength : Float)
+    @tank.distribute(@dst, message, color, strength, deadzone: 1)
   end
 
-  def draw(target : SF::RenderTarget, in tank : Tank)
-    target.draw(@drawable)
+  def draw(target : SF::RenderTarget, states : SF::RenderStates)
+    @drawable.draw(target, states)
   end
 end
 
@@ -657,8 +605,8 @@ class Tank
       return true unless a = @tank.find_entity_by_body?(ba)
       return true unless b = @tank.find_entity_by_body?(bb)
 
-      a.smack(b, in: @tank)
-      b.smack(a, in: @tank)
+      a.smack(b)
+      b.smack(a)
 
       true
     end
@@ -709,12 +657,12 @@ class Tank
     # Ask the previously inspected entity on whether it wants
     # to stop being inspected.
     if prev = @inspecting
-      ok &= prev.stop_inspection?(in: self)
+      ok &= prev.stop_inspection?
     end
 
     # Ask the to-be-inspected entity on whether it wants to
     # start being inspected.
-    ok &&= other.start_inspection?(in: self) if other
+    ok &&= other.start_inspection? if other
 
     @inspecting = other if ok
 
@@ -756,23 +704,23 @@ class Tank
   end
 
   def cell(*, to pos : Vector2)
-    cell = Cell.new
+    cell = CellAvatar.new(self, cell: Cell.new)
     cell.mid = pos
-    cell.summon(in: self)
+    cell.summon
     cell
   end
 
   def vein(*, to pos : Vector2)
-    vein = Vein.new
+    vein = Vein.new(self)
     vein.mid = pos
-    vein.summon(in: self)
+    vein.summon
     vein
   end
 
-  def wire(*, from cell : Cell, to pos : Vector2)
-    wire = Wire.new(cell, pos)
+  def wire(*, from cell : CellAvatar, to pos : Vector2)
+    wire = Wire.new(self, cell, pos)
     cell.add_wire(wire)
-    wire.summon(in: self)
+    wire.summon
     wire
   end
 
@@ -789,7 +737,7 @@ class Tank
   end
 
   def each_cell
-    @entities.each(Cell) do |cell|
+    @entities.each(CellAvatar) do |cell|
       yield cell
     end
   end
@@ -813,11 +761,11 @@ class Tank
   end
 
   def find_cell_at?(pos : Vector2)
-    @entities.at?(Cell, pos)
+    @entities.at?(CellAvatar, pos)
   end
 
-  def distribute(origin : Vector2, message : Message, color : SF::Color, deadzone = Cell.radius * 1.2)
-    vamt = fmessage_amount(message.strength)
+  def distribute(origin : Vector2, message : Message, color : SF::Color, strength : Float, deadzone = CellAvatar.radius * 1.2)
+    vamt = fmessage_amount(strength)
 
     return unless vamt.in?(1.0..1024.0) # safety belt
 
@@ -825,31 +773,29 @@ class Tank
 
     vamt = vamt.to_i
     vrays = vrays.to_i
-    vlifespan = fmessage_lifespan_ms(message.strength).milliseconds
+    vlifespan = fmessage_lifespan_ms(strength).milliseconds
 
     vamt.times do |v|
       angle = Math.radians(((v / vrays) * 360) + rand * 360)
-      impulse = angle.dir * (10.0..100.0).sample # FIXME: should depend on strength
-      vesicle = Vesicle.new(message, impulse, vlifespan, color, birth: Time.monotonic)
+      vesicle = Vesicle.new(self, message, angle, strength, vlifespan, color, birth: Time.monotonic)
       vesicle.mid = origin + (angle.dir * deadzone)
-      vesicle.summon(in: self)
+      vesicle.summon
     end
   end
 
-  def distribute_vein_bi(origin : Vector2, message : Message, color : SF::Color, lifespan : Time::Span)
+  def distribute_vein_bi(origin : Vector2, message : Message, color : SF::Color, lifespan : Time::Span, strength : Float)
     vamt = 2
     vrays = 2
 
     vamt.times do |v|
       angle = Math.radians(((v / vrays) * 360))
-      impulse = angle.dir * message.strength
-      vesicle = Vesicle.new(message, impulse, lifespan, color, birth: Time.monotonic)
+      vesicle = Vesicle.new(self, message, angle, strength, lifespan, color, birth: Time.monotonic)
       if v.even?
         vesicle.mid = origin + (angle.dir * Vein.width)
       else
         vesicle.mid = origin + angle.dir
       end
-      vesicle.summon(in: self)
+      vesicle.summon
     end
   end
 
@@ -857,10 +803,10 @@ class Tank
     @watch.tick
     @space.step(delta)
 
-    each_entity &.tick(delta, in: self)
+    each_entity &.tick(delta)
 
-    each_cell &.systole(in: self)
-    each_cell &.dyastole(in: self)
+    each_cell &.systole
+    each_cell &.dyastole
   end
 
   def handle(event : SF::Event)
@@ -868,7 +814,7 @@ class Tank
   end
 
   def follow(view : SF::View) : SF::View
-    @inspecting.try &.follow(in: self, view: view) || view
+    @inspecting.try &.follow(view) || view
   end
 
   def draw(target, states)
@@ -912,7 +858,7 @@ class Tank
       each_entity_by_z_index do |entity|
         next if entity == @inspecting
 
-        entity.draw(entity.is_a?(Vesicle) ? @vesicles_texture : target, in: self)
+        (entity.is_a?(Vesicle) ? @vesicles_texture : target).draw(entity)
       end
 
       @vesicles_texture.display
@@ -924,7 +870,7 @@ class Tank
       # Then draw the inspected entity. This is done so that
       # the inspected entity is in front, that is, drawn on
       # top of everything else.
-      @inspecting.try &.draw(target, in: self)
+      @inspecting.try { |entity| target.draw(entity) }
 
       target.draw(self)
     when :entropy
@@ -1076,7 +1022,7 @@ end
 MOUSE_ID = UUID.random
 
 class Mode::Normal < Mode
-  def initialize(@elevated : Cell? = nil, @ondrop : Mode = self)
+  def initialize(@elevated : CellAvatar? = nil, @ondrop : Mode = self)
   end
 
   def hint : ModeHint
@@ -1111,7 +1057,7 @@ class Mode::Normal < Mode
 
     # If a cell is being inspected and cursor is in bounds of
     # its editor, redirect.
-    if (cell = app.tank.@inspecting.as?(Cell)) && cell.point_in_editor?(coords)
+    if (cell = app.tank.@inspecting.as?(CellAvatar)) && cell.point_in_editor?(coords)
       event.x = coords.x.to_i - cell.editor_position.x.to_i
       event.y = coords.y.to_i - cell.editor_position.y.to_i
       cell.handle(event)
@@ -1154,8 +1100,7 @@ class Mode::Normal < Mode
       app.tank.distribute(coords, Message.new(
         keyword: "mouse",
         args: [] of Memorable,
-        strength: @clicks == 2 ? 250 : 130
-      ), SF::Color.new(*(@clicks == 2 ? {0xf7, 0x9b, 0x98} : {0xc1, 0x6b, 0x69})), deadzone: 1)
+      ), SF::Color.new(*(@clicks == 2 ? {0xf7, 0x9b, 0x98} : {0xc1, 0x6b, 0x69})), strength: @clicks == 2 ? 250.0 : 130.0, deadzone: 1)
     end
 
     self
@@ -1165,7 +1110,7 @@ class Mode::Normal < Mode
     coords = app.coords(event)
     # If a cell is being inspected and cursor is in bounds of
     # its editor, redirect.
-    if (cell = app.tank.@inspecting.as?(Cell)) && cell.point_in_editor?(coords)
+    if (cell = app.tank.@inspecting.as?(CellAvatar)) && cell.point_in_editor?(coords)
       event.x = coords.x.to_i - cell.editor_position.x.to_i
       event.y = coords.y.to_i - cell.editor_position.y.to_i
       cell.handle(event)
@@ -1189,7 +1134,7 @@ class Mode::Normal < Mode
 
     # If a cell is being inspected and cursor is in bounds of
     # its editor, redirect.
-    if (cell = app.tank.@inspecting.as?(Cell)) && cell.point_in_editor?(coords)
+    if (cell = app.tank.@inspecting.as?(CellAvatar)) && cell.point_in_editor?(coords)
       event.x = coords.x.to_i - cell.editor_position.x.to_i
       event.y = coords.y.to_i - cell.editor_position.y.to_i
       cell.handle(event)
@@ -1268,7 +1213,7 @@ class Mode::Slaying < Mode
 
   # Delete cell only if LMB was pressed AND released over it.
 
-  @pressed_on : Cell?
+  @pressed_on : CellAvatar?
 
   def map(app, event : SF::Event::MouseButtonPressed)
     return super unless event.button.left?
@@ -1287,7 +1232,7 @@ class Mode::Slaying < Mode
     when .left?
       released_on = app.tank.find_cell_at?(coords)
       if released_on && @pressed_on.same?(released_on)
-        released_on.suicide(in: app.tank)
+        released_on.suicide
       end
     end
 
@@ -1308,7 +1253,7 @@ class Mode::Slaying < Mode
   end
 end
 
-record WireConfig, from : Cell? = nil, to : Vector2? = nil
+record WireConfig, from : CellAvatar? = nil, to : Vector2? = nil
 
 class Mode::Shift < Mode::Normal
   def initialize(@wire : WireConfig)
@@ -1325,7 +1270,7 @@ class Mode::Shift < Mode::Normal
     )
   end
 
-  def submit(app : App, src : Cell, dst : Vector2)
+  def submit(app : App, src : CellAvatar, dst : Vector2)
     app.tank.wire(from: src, to: dst)
   end
 
@@ -1431,9 +1376,7 @@ class Mode::Ctrl < Mode
     when .right?
       coords = app.coords(event)
       if cell = app.tank.find_cell_at?(coords)
-        copy = cell.copy
-        copy.mid = coords
-        copy.summon(in: app.tank)
+        copy = cell.replicate(to: coords)
         app.tank.inspect(copy)
         return Mode::Normal.new(elevated: copy, ondrop: self)
       end
@@ -1883,11 +1826,11 @@ class App
         when SF::Event::Closed
           @scene_window.close
         when SF::Event::KeyPressed
-          @tank.each_vein &.emit("key", [event.code.to_s] of Memorable, color: Cell.color(l: 80, c: 70))
+          @tank.each_vein &.emit("key", [event.code.to_s] of Memorable, color: CellAvatar.color(l: 80, c: 70))
         when SF::Event::TextEntered
           chr = event.unicode.chr
           if chr.printable?
-            @tank.each_vein &.emit("chr", [chr.to_s] of Memorable, color: Cell.color(l: 80, c: 70))
+            @tank.each_vein &.emit("chr", [chr.to_s] of Memorable, color: CellAvatar.color(l: 80, c: 70))
           end
         end
       end

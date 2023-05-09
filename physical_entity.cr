@@ -23,12 +23,12 @@ abstract class PhysicalEntity < Entity
     # computing jitter motion.
     abstract def jangles
 
-    def tick(delta : Float, in tank : Tank)
+    def tick(delta : Float)
       super
 
       return if @jitter.zero?
 
-      samples = jangles.map { |angle| {angle, tank.entropy(mid + self.class.radius + angle.dir * self.class.radius)} }
+      samples = jangles.map { |angle| {angle, @tank.entropy(mid + self.class.radius + angle.dir * self.class.radius)} }
 
       min_hdg, _ = samples.min_by { |angle, entropy| entropy }
       max_hdg, _ = samples.max_by { |angle, entropy| entropy }
@@ -64,8 +64,8 @@ abstract class PhysicalEntity < Entity
 
   @body : CP::Body
 
-  def initialize(color : SF::Color, lifespan : Time::Span?)
-    super(color, lifespan)
+  def initialize(tank : Tank, color : SF::Color, lifespan : Time::Span?)
+    super(tank, color, lifespan)
 
     @body = self.class.body
   end
@@ -100,36 +100,28 @@ abstract class PhysicalEntity < Entity
     @body.velocity = 0.at(0).cp
   end
 
-  def summon(in tank : Tank)
+  def summon
     super
 
-    tank.insert(self, @body)
+    @tank.insert(self, @body)
 
     nil
   end
 
-  def suicide(in tank : Tank)
+  def suicide
     super
 
-    tank.remove(self, @body)
+    @tank.remove(self, @body)
 
     nil
   end
 
   # Returns a sample [0; 1] of entropy at this entity's position.
   def entropy
-    return 0.0 if @tanks.empty?
-
-    mean = 0.0
-
-    @tanks.each do |tank|
-      mean += tank.entropy(mid)
-    end
-
-    mean / @tanks.size
+    @tank.entropy(mid)
   end
 
-  # Invoked when this and *other* entities collide in *tank*.
-  def smack(other : PhysicalEntity, in tank : Tank)
+  # Invoked when this and *other* entities collide.
+  def smack(other : PhysicalEntity)
   end
 end
