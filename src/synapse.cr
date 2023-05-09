@@ -142,10 +142,6 @@ def fmessage_strength_to_jitter(strength : Float)
   end
 end
 
-module Inspectable
-  abstract def follow(view : SF::View) : SF::View
-end
-
 record Message, keyword : String, args : Array(Memorable)
 
 class Vesicle < CircularEntity
@@ -315,7 +311,7 @@ class CellAvatar < CircularEntity
     nil
   end
 
-  def follow(view : SF::View) : SF::View
+  def into(view : SF::View) : SF::View
     return view unless inspection_role? is: IRole::Main
 
     top_left = view.center - SF.vector2f(view.size.x/2, view.size.y/2)
@@ -440,20 +436,16 @@ class CellAvatar < CircularEntity
     (mid + 32.at(32)).sfi
   end
 
-  def start_inspection?
+  def focus
     @editor = @cell.to_editor
-
-    true
   end
 
-  def stop_inspection?
+  def blur
     @cell.adhere(@editor.to_protocol_collection)
 
     # FIXME: hack: Rerun birth rules unconditionally. But this
     # should happen only if they changed!
     @cell.born(avatar: self)
-
-    true
   end
 
   # Prefer using `Tank` to calling this method yourself because
@@ -625,8 +617,6 @@ class Wire < Entity
 end
 
 class Tank
-  include SF::Drawable
-
   class TankDispatcher < CP::CollisionHandler
     def initialize(@tank : Tank)
       super()
@@ -645,7 +635,6 @@ class Tank
     end
   end
 
-  @inspecting : Inspectable?
   @scatterer : UUID
 
   def initialize
@@ -662,7 +651,7 @@ class Tank
 
     @watch = TimeTable.new(App.time)
 
-    # Generate milliseconds between 0..2000 based on turbulence.
+    # Compute milliseconds between 0..2000 by scaling turbulence.
     @scatterer = @watch.every(((1 - self.class.turbulence) * 2000).milliseconds) do
       @stime += 1
     end
@@ -672,36 +661,29 @@ class Tank
     @space.add_collision_handler(dispatcher)
   end
 
-  # Turbulence factor [0; 1] determines how often entropy
-  # time is incremented, which in turn advances the entropy
-  # noise. That is, entities will entropy in a slightly different
-  # direction at the same position.
+  # Turbulence factor [0; 1] determines how often entropy time is incremented.
+  # Entropy time is the third dimension of entropy. The other two are the X, Y
+  # coordinates of the sampled point.
   def self.turbulence
     0.4
   end
 
+  @lens : Lens = Lens::Blurred.new
+
   def inspecting?(object : Inspectable?)
-    @inspecting.same?(object)
+    @lens.aiming_at?(object)
   end
 
-  def inspect(other : Inspectable?)
-    ok = true
+  def inspect(object : Inspectable?)
+    @lens = @lens.focus(object)
+  end
 
-    # Ask the previously inspected entity on whether it wants
-    # to stop being inspected.
-    if prev = @inspecting
-      ok &= prev.stop_inspection?
-    end
+  def handle(event : SF::Event)
+    @lens.forward(event)
+  end
 
-    # Ask the to-be-inspected entity on whether it wants to
-    # start being inspected.
-    ok &&= other.start_inspection? if other
-
-    @inspecting = other if ok
-
-    other ? App.the.stop_time : App.the.start_time
-
-    other
+  def follow(view : SF::View)
+    @lens.configure(view)
   end
 
   def entropy(at pos : Vector2)
@@ -842,19 +824,6 @@ class Tank
     each_cell &.dyastole
   end
 
-  def handle(event : SF::Event)
-    @inspecting.try &.handle(event)
-  end
-
-  def follow(view : SF::View) : SF::View
-    @inspecting.try &.follow(view) || view
-  end
-
-  def draw(target, states)
-    # dd = SFMLDebugDraw.new(target, states)
-    # dd.draw(@space)
-  end
-
   JCIRC = SF::CircleShape.new(point_count: 10)
 
   @emap = SF::RenderTexture.new
@@ -889,7 +858,7 @@ class Tank
       # Draw entities ordered by their z index.
       #
       each_entity_by_z_index do |entity|
-        next if entity == @inspecting
+        next if @lens.aiming_at?(entity)
 
         (entity.is_a?(Vesicle) ? @vesicles_texture : target).draw(entity)
       end
@@ -903,9 +872,7 @@ class Tank
       # Then draw the inspected entity. This is done so that
       # the inspected entity is in front, that is, drawn on
       # top of everything else.
-      @inspecting.try { |entity| target.draw(entity) }
-
-      target.draw(self)
+      @lens.each { |entity| target.draw(entity) }
     when :entropy
       #
       # Draw jitter map for the visible area.
@@ -1090,10 +1057,14 @@ class Mode::Normal < Mode
 
     # If a cell is being inspected and cursor is in bounds of
     # its editor, redirect.
-    if (cell = app.tank.@inspecting.as?(CellAvatar)) && cell.point_in_editor?(coords)
-      event.x = coords.x.to_i - cell.editor_position.x.to_i
-      event.y = coords.y.to_i - cell.editor_position.y.to_i
-      cell.handle(event)
+
+    app.tank.@lens.each do |object|
+      next unless object.is_a?(CellAvatar) && object.point_in_editor?(coords)
+
+      event.x = coords.x.to_i - object.editor_position.x.to_i
+      event.y = coords.y.to_i - object.editor_position.y.to_i
+      object.handle(event)
+
       return self
     end
 
@@ -1143,10 +1114,13 @@ class Mode::Normal < Mode
     coords = app.coords(event)
     # If a cell is being inspected and cursor is in bounds of
     # its editor, redirect.
-    if (cell = app.tank.@inspecting.as?(CellAvatar)) && cell.point_in_editor?(coords)
-      event.x = coords.x.to_i - cell.editor_position.x.to_i
-      event.y = coords.y.to_i - cell.editor_position.y.to_i
-      cell.handle(event)
+    app.tank.@lens.each do |object|
+      next unless object.is_a?(CellAvatar) && object.point_in_editor?(coords)
+
+      event.x = coords.x.to_i - object.editor_position.x.to_i
+      event.y = coords.y.to_i - object.editor_position.y.to_i
+      object.handle(event)
+
       return self
     end
 
@@ -1167,10 +1141,13 @@ class Mode::Normal < Mode
 
     # If a cell is being inspected and cursor is in bounds of
     # its editor, redirect.
-    if (cell = app.tank.@inspecting.as?(CellAvatar)) && cell.point_in_editor?(coords)
-      event.x = coords.x.to_i - cell.editor_position.x.to_i
-      event.y = coords.y.to_i - cell.editor_position.y.to_i
-      cell.handle(event)
+    app.tank.@lens.each do |object|
+      next unless object.is_a?(CellAvatar) && object.point_in_editor?(coords)
+
+      event.x = coords.x.to_i - object.editor_position.x.to_i
+      event.y = coords.y.to_i - object.editor_position.y.to_i
+      object.handle(event)
+
       return self
     end
 
