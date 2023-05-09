@@ -25,6 +25,10 @@ TODO: Write a description here
 On the GIFs below you'll notice the interesting stuff as well as the bugs/not-working
 stuff. At least have fun watching them haha :)
 
+**A lot of cells in a group resembling a fish, demonstrating mass signal transmission and suppression**:
+
+![Animation of the above](./res/fish.gif)
+
 **A cell is following mouse, can notify other cells of this fact:**
 
 ![Animation of the above](./res/mouseFollower.gif)

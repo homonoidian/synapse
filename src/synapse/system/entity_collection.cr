@@ -7,9 +7,9 @@
 class EntityCollection
   @entities = {} of Entity.class => Hash(UUID, Entity)
 
-  # Returns the amount of entities in this collection
+  # Returns the amount of entities in this collection.
   def size
-    @entities.sum(&.size)
+    @entities.sum { |_, hash| hash.size }
   end
 
   # Returns the entity with the given *id*, or nil if there

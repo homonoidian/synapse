@@ -448,7 +448,7 @@ class ProtocolCollection
   #
   # *receiver* is the receiver cell of expression.
   def born(receiver : CellAvatar)
-    each_enabled_protocol &.each_birth_rule(&.express(receiver))
+    each_protocol &.each_birth_rule(&.express(receiver))
   end
 
   @_systole_heartbeats = [] of HeartbeatRule
