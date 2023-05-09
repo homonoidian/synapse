@@ -749,23 +749,6 @@ class Wire < Entity
   end
 end
 
-class Actor
-  include SF::Drawable
-
-  def initialize
-    @text = SF::Text.new("", FONT, 11)
-    @text.fill_color = SF::Color::Black
-  end
-
-  def prn(string)
-    @text.string += string
-  end
-
-  def draw(target, states)
-    @text.draw(target, states)
-  end
-end
-
 class Tank
   include SF::Drawable
 
@@ -796,7 +779,6 @@ class Tank
     @space.damping = 0.3
     @space.gravity = CP.v(0, 0)
 
-    @actors = [] of Actor
     @entities = EntityCollection.new
     @bodies = {} of UInt64 => PhysicalEntity
 
@@ -851,12 +833,6 @@ class Tank
     @entropy.generate(pos.x/100, pos.y/100, @stime/10) * 0.5 + 0.5
   end
 
-  def prn(cell : Cell, message : String)
-    @actors.each do |actor|
-      actor.prn(message)
-    end
-  end
-
   def has_no_cells?
     each_cell { return false }
 
@@ -874,19 +850,11 @@ class Tank
     @entities.insert(entity)
   end
 
-  def insert(actor : Actor)
-    @actors << actor
-  end
-
   def remove(entity : Entity, object : CP::Shape | CP::Body)
     @space.remove(object)
     if object.is_a?(CP::Body)
       @bodies.delete(object.object_id)
     end
-  end
-
-  def remove(actor : Actor)
-    @actors.delete(actor)
   end
 
   def remove(entity : Entity)
@@ -912,12 +880,6 @@ class Tank
     cell.add_wire(wire)
     wire.summon(in: self)
     wire
-  end
-
-  def each_actor
-    @actors.each do |actor|
-      yield actor
-    end
   end
 
   def each_entity
@@ -1124,8 +1086,6 @@ class Tank
       sprite = SF::Sprite.new(@emap.texture)
       sprite.position = top_left
       target.draw(sprite)
-    when :actors
-      each_actor { |actor| target.draw(actor) }
     end
   end
 end
@@ -1859,7 +1819,6 @@ class App
     end
 
     @tank.vein(to: 0.at(0))
-    @tank.insert(Actor.new)
 
     @mode = Mode::Normal.new
     @mode.load(self)
@@ -1954,7 +1913,6 @@ class App
 
     @tank.draw(:entropy, @editor) if heightmap?
     @tank.draw(:entities, @editor)
-    @tank.draw(:actors, @scene_window)
     # Draw console window...
     @console.draw(self, @editor)
     @editor.display
