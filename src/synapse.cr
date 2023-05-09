@@ -165,11 +165,12 @@ class Vesicle < CircularEntity
     @strength : Float64,
     lifespan : Time::Span,
     color : SF::Color,
-    @birth : Time::Span
+    @birth : Time::Span,
+    randomize = true
   )
     super(tank, color, lifespan)
 
-    impulse = angle_rad.dir * (10.0..100.0).sample # FIXME: should depend on strength
+    impulse = angle_rad.dir * (randomize ? (10.0..100.0).sample : strength) # FIXME: should depend on strength
 
     @body.apply_impulse_at_local_point(impulse.cp, CP.v(0, 0))
   end
@@ -584,7 +585,7 @@ class Vein < MorphEntity
 
     # Distribute at each 5th heightpoint.
     0.step(to: self.class.height, by: 10) do |yoffset|
-      @tank.distribute_vein_bi(mid + 0.at(yoffset), message, color, 400.milliseconds, strength: 50.0)
+      @tank.distribute_vein_bi(mid + yoffset.y, message, color, 400.milliseconds, strength: 50.0)
     end
   end
 
@@ -821,7 +822,7 @@ class Tank
 
     vamt.times do |v|
       angle = Math.radians(((v / vrays) * 360))
-      vesicle = Vesicle.new(self, message, angle, strength, lifespan, color, birth: Time.monotonic)
+      vesicle = Vesicle.new(self, message, angle, strength, lifespan, color, birth: Time.monotonic, randomize: false)
       if v.even?
         vesicle.mid = origin + (angle.dir * Vein.width)
       else
@@ -1191,7 +1192,7 @@ class Mode::Normal < Mode
       return self
     end
 
-    app.pan(0.at(-event.delta * 10))
+    app.pan((-event.delta * 10).y)
 
     self
   end
@@ -1307,7 +1308,7 @@ class Mode::Shift < Mode::Normal
   end
 
   def map(app, event : SF::Event::MouseWheelScrolled)
-    app.pan((-event.delta * 10).at(0))
+    app.pan((-event.delta * 10).x)
 
     self
   end

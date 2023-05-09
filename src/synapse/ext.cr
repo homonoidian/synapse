@@ -152,7 +152,20 @@ struct Vector2
 end
 
 abstract struct Number
-  # Returns a `Vector2` from this number to *other* number.
+  # Returns a `Vector2` with this number as the X coordinate and 0 as
+  # the Y coordinate.
+  def x
+    Vector2.new(self, 0)
+  end
+
+  # Returns a `Vector2` with this number as the Y coordinate and 0 as
+  # the X coordinate.
+  def y
+    Vector2.new(0, self)
+  end
+
+  # Returns a `Vector2` with this number as the X coordinate and *other*
+  # number as the Y coordinate.
   def at(other : Number)
     Vector2.new(self, other)
   end
@@ -161,10 +174,6 @@ abstract struct Number
   # the corresponding direction vector.
   def dir
     Vector2.new(Math.cos(self), Math.sin(self))
-  end
-
-  def map(from inp : Range, to outp : Range)
-    outp.begin + (outp.size / inp.size) * (self - inp.begin)
   end
 end
 
