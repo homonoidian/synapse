@@ -249,11 +249,86 @@ class ExpressionContext
     1
   end
 
-  # Summons a shallow copy (aka relative) of this cell.
+  # Summons a complete copy of this cell.
   #
-  # Relatives share their protocol but not instance memory.
+  # Synopsis:
+  #
+  # * `replicate()`: copy all protocols, carry over whether each is
+  # enabled/disabled.
+  #
+  # * `replicate(...protocols : owned protocol)`: copy specified protocols,
+  # carry over whether each is enabled/disabled.
+  #
+  # * `replicate(enabled: {...owned protocol}, disabled: {...owned protocol}):
+  # copy specified protocols, set enabled/disabled based on collection.
   def replicate(state : LibLua::State)
-    @receiver.replicate
+    stack = Lua::Stack.new(state, :all)
+
+    #
+    # Copy all protocols, carry over whether each is enabled/disabled.
+    #
+    if stack.size == 0
+      @receiver.replicate
+      return 1
+    end
+
+    #
+    # Copy specified protocols, set enabled/disabled based on collection.
+    #
+    if stack.size == 2 && (enabled = stack[1].as?(Lua::Table)) && (disabled = stack[2].as?(Lua::Table))
+      enabled_set = Set(Protocol).new
+      disabled_set = Set(Protocol).new
+
+      enabled.each do |_, element|
+        element = element.to_crystal if element.is_a?(Lua::Callable)
+
+        unless element.is_a?(OwnedProtocol)
+          raise Lua::RuntimeError.new("replicate({enabled}, disabled): expected an owned protocol, got: #{element}")
+        end
+
+        enabled_set << element._protocol
+      end
+
+      disabled.each do |_, element|
+        element = element.to_crystal if element.is_a?(Lua::Callable)
+
+        unless element.is_a?(OwnedProtocol)
+          raise Lua::RuntimeError.new("replicate(enabled, {disabled}): expected an owned protocol, got: #{element}")
+        end
+
+        disabled_set << element._protocol
+      end
+
+      @receiver.replicate_with_select_protocols do |protocol|
+        if keep = enabled_set.includes?(protocol)
+          protocol.enable
+        elsif keep = disabled_set.includes?(protocol)
+          protocol.disable
+        end
+
+        keep
+      end
+
+      return 1
+    end
+
+    #
+    # Copy specified protocols, carry over whether each is enabled/disabled.
+    #
+    protocols = Set(Protocol).new
+
+    until stack.size == 0
+      arg = stack.pop
+      arg = arg.to_crystal if arg.is_a?(Lua::Callable)
+
+      unless arg.is_a?(OwnedProtocol)
+        raise Lua::RuntimeError.new("replicate(...protocols : owned protocols): expected an owned protocol")
+      end
+
+      protocols << arg._protocol
+    end
+
+    @receiver.replicate_with_select_protocols &.in?(protocols)
 
     1
   end
@@ -266,7 +341,7 @@ class ExpressionContext
   # Synopsis:
   #
   # * `send(keyword : string)`
-  # * `send(keyword : string, ...args : protocol|boolean|number|table|string|nil)`
+  # * `send(keyword : string, ...args : owned protocol|boolean|number|table|string|nil)`
   def send(state : LibLua::State)
     stack = Lua::Stack.new(state, :all)
 

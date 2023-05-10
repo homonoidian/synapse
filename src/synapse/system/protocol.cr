@@ -511,6 +511,11 @@ class OwnedProtocol
   def initialize(@name : String, @protocol : Protocol)
   end
 
+  # Returns the protocol that is owned.
+  def _protocol
+    @protocol
+  end
+
   # Returns the name of this protocol.
   #
   # Synopsis:

@@ -166,8 +166,23 @@ class CellAvatar < CircularEntity
     fail(result)
   end
 
-  def replicate(to coords = mid)
+  def replicate(to coords = mid) : CellAvatar
     replica = CellAvatar.new(@tank, @cell.copy, @color, CellEditor.new)
+    replica.mid = coords
+    replica.summon
+    replica
+  end
+
+  def replicate_with_select_protocols(to coords = mid, &)
+    protocols = ProtocolCollection.new
+
+    @cell.each_protocol do |protocol|
+      if yield protocol
+        protocols.summon(protocol)
+      end
+    end
+
+    replica = CellAvatar.new(@tank, @cell.copy(protocols), @color, CellEditor.new)
     replica.mid = coords
     replica.summon
     replica

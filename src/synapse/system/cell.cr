@@ -69,6 +69,14 @@ class Cell
     end
   end
 
+  # Yields each protocol owned by this cell, regardless of whether it
+  # is enabled, disabled, or has a name.
+  def each_protocol(&)
+    @protocols.each_protocol do |protocol|
+      yield protocol
+    end
+  end
+
   # Yields each protocol owned by this cell wrapped in `OwnedProtocol`,
   # followed by its name.
   def each_owned_protocol_with_name(&)
@@ -116,9 +124,10 @@ class Cell
     @protocols.dyastole(avatar)
   end
 
-  # Builds and returns a copy of this cell.
-  def copy
-    Cell.new(UUID.random, @protocols, @relatives)
+  # Builds and returns a copy of this cell, possibly one using a
+  # different collection of *protocols*.
+  def copy(protocols : ProtocolCollection = @protocols)
+    Cell.new(UUID.random, protocols, @relatives)
   end
 
   # Returns a new `CellEditor` for this cell.
