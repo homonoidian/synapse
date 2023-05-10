@@ -251,11 +251,14 @@ class TimeTable
 
       return false unless delta >= 0
 
-      # We might have missed some...
-      count = ((delta / period_ms).trunc + 1).to_i
-      count.times { @code.call }
-
-      return true unless repeating?
+      if repeating?
+        # We might have missed some...
+        count = ((delta / period_ms).trunc + 1).to_i
+        count.times { @code.call }
+      else
+        @code.call
+        return true
+      end
 
       @start = Time.monotonic
 

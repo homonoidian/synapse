@@ -149,13 +149,22 @@ abstract class Tank
     @vesicles_texture.view = view
     @vesicles_texture.clear(SF::Color.new(0x21, 0x21, 0x21, 0))
 
+    vesicles = SF::VertexArray.new(SF::Points, @entities.count(Vesicle))
+
+    @entities.each(Vesicle) do |vesicle|
+      vesicles.append(vesicle.to_vertex)
+    end
+
+    @vesicles_texture.draw(vesicles)
+
     #
     # Draw entities ordered by their z index.
     #
-    each_entity_by_z_index do |entity|
+    @entities.each_by_z_index(except: {Vesicle}) do |entity|
       next if @lens.aiming_at?(entity)
+      next unless entity.is_a?(SF::Drawable)
 
-      (entity.is_a?(Vesicle) ? @vesicles_texture : target).draw(entity)
+      target.draw(entity)
     end
 
     @vesicles_texture.display

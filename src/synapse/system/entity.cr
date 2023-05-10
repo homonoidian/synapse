@@ -61,6 +61,8 @@ abstract class Entity
   #
   # Be careful not to call this method if this entity is not in the tank.
   def suicide
+    # Important! Unregister timer if we've still not reached it.
+    @watch.cancel(@decay)
     @tank.remove(self)
 
     nil

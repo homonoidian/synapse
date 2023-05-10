@@ -7,6 +7,11 @@
 class EntityCollection
   @entities = {} of Entity.class => Hash(UUID, Entity)
 
+  # Returns the amount of entities of the given *type* in this collection.
+  def count(type : T.class) forall T
+    @entities[T]?.try &.size || 0
+  end
+
   # Returns the amount of entities in this collection.
   def size
     @entities.sum { |_, hash| hash.size }
@@ -63,9 +68,11 @@ class EntityCollection
 
   # Yields all entities in this collection ordered by their
   # Z-index, ascending (first is bottom, and last is top).
-  def each_by_z_index
+  def each_by_z_index(except : Iterable(Entity.class) = Tuple.new, &)
     entities = Array(Entity).new(size)
     each do |entity|
+      next if except.includes?(entity.class)
+
       entities << entity
     end
 

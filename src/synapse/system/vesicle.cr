@@ -1,5 +1,4 @@
 class Vesicle < CircularEntity
-  include SF::Drawable
   include Jitter
 
   # Returns the message transported by this vesicle.
@@ -59,9 +58,7 @@ class Vesicle < CircularEntity
     other.receive(self)
   end
 
-  def draw(target : SF::RenderTarget, states : SF::RenderStates)
-    vary = SF::VertexArray.new(SF::Points, 1)
-    vary.append SF::Vertex.new(mid.sfi, @color)
-    vary.draw(target, states)
+  def to_vertex
+    SF::Vertex.new(mid.sfi, @color)
   end
 end
