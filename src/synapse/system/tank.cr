@@ -41,7 +41,14 @@ abstract class Tank
   end
 
   def inspect(object : Inspectable?)
-    @lens = @lens.focus(object)
+    inspect(object) {}
+  end
+
+  def inspect(object : Inspectable?, &)
+    @lens.focus(object) do |lens|
+      @lens = lens
+      yield
+    end
   end
 
   def handle(event : SF::Event)
@@ -74,6 +81,10 @@ abstract class Tank
 
   def find_entity_at?(pos : Vector2)
     @entities.at?(pos)
+  end
+
+  def find_at?(pos : Vector2, type : T.class) forall T
+    @entities.at?(T, pos)
   end
 
   def insert(entity : Entity, object : CP::Shape | CP::Body)

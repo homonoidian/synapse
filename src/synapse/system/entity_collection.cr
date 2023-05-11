@@ -84,10 +84,12 @@ class EntityCollection
 
   # Yields all entities of type `T` in this collection.
   def each(type : T.class) forall T
-    return unless store = @entities[T]?
-
-    store.each_value do |entity|
-      yield entity.as(T)
-    end
+    {% for subclass in [T] + T.all_subclasses %}
+      if store = @entities[{{subclass}}]?
+        store.each_value do |entity|
+          yield entity.as(T)
+        end
+      end
+    {% end %}
   end
 end

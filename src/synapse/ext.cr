@@ -135,6 +135,14 @@ struct Vector2
     {@x, @y}
   end
 
+  def ox
+    Vector2.new(@x, 0)
+  end
+
+  def oy
+    Vector2.new(0, @y)
+  end
+
   # Returns the corresponding SFML floating-point vector.
   def sf
     SF.vector2f(@x, @y)
@@ -162,6 +170,11 @@ abstract struct Number
   # the X coordinate.
   def y
     Vector2.new(0, self)
+  end
+
+  # Returns a `Vector2` with this number set as both the X and the Y coordinate.
+  def xy
+    Vector2.new(self, self)
   end
 
   # Returns a `Vector2` with this number as the X coordinate and *other*

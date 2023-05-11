@@ -7,7 +7,7 @@
 # The latter is the only thing that actually differentiates
 # entities under the hood.
 abstract class Entity
-  @decay : UUID
+  @decay : UUID?
 
   def initialize(@tank : Tank, @color : SF::Color, lifespan : Time::Span?)
     # Unique ID of this entity.
@@ -45,7 +45,7 @@ abstract class Entity
   # is to death (e.g. 0 means it's newborn, and 1 means it's
   # about to die).
   def decay
-    @watch.progress(@decay)
+    @decay.try { |id| @watch.progress(id) } || 0.0
   end
 
   # Spawns this entity in the tank.
@@ -62,7 +62,7 @@ abstract class Entity
   # Be careful not to call this method if this entity is not in the tank.
   def suicide
     # Important! Unregister timer if we've still not reached it.
-    @watch.cancel(@decay)
+    @decay.try { |id| @watch.cancel(id) }
     @tank.remove(self)
 
     nil

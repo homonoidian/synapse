@@ -30,15 +30,15 @@ end
 # from one `Inspectable` to another and to void, forward events to the
 # inspectable it's aiming at, and so on.
 abstract struct Lens
-  # Creates and returns a new `Lens` object which is aimed at the given
-  # inspectable *object*.
-  def focus(object : Inspectable) : Lens
-    Lens::Focused.new(object)
+  # Yields a new `Lens` object which is aimed at the given inspectable
+  # *object* if the currently focused object wants to blur.
+  def focus(object : Inspectable, & : Lens ->)
+    yield Lens::Focused.new(object)
   end
 
   # :ditto:
-  def focus(object : Nil)
-    Lens::Blurred.new
+  def focus(object : Nil, & : Lens ->)
+    yield Lens::Blurred.new
   end
 
   # Returns whether this lens is aimed at the given *object*.
@@ -63,12 +63,12 @@ end
 
 # Represents a blurred lens -- a lens pointing at nothing (nil).
 struct Lens::Blurred < Lens
-  def focus(object : Inspectable) : Lens
-    return self unless object.can_be_focused?
+  def focus(object : Inspectable, &block : Lens ->)
+    if object.can_be_focused?
+      object.focus
+    end
 
-    object.focus
-
-    super
+    super { |lens| yield lens }
   end
 
   def aiming_at?(object : Nil)
@@ -81,22 +81,26 @@ struct Lens::Focused < Lens
   def initialize(@object : Inspectable)
   end
 
-  def focus(object : Inspectable) : Lens
-    return self if aiming_at?(object)
-    return self unless @object.can_be_blurred? && object.can_be_focused?
+  def focus(object : Inspectable, &block : Lens ->)
+    if aiming_at?(object)
+      yield self
+      return
+    end
+
+    return unless @object.can_be_blurred? && object.can_be_focused?
 
     @object.blur
     object.focus
 
-    super
+    super { |lens| yield lens }
   end
 
-  def focus(object : Nil) : Lens
-    return self unless @object.can_be_blurred?
+  def focus(object : Nil, &block : Lens ->)
+    return unless @object.can_be_blurred?
 
     @object.blur
 
-    super
+    super { |lens| yield lens }
   end
 
   def aiming_at?(object : Inspectable)
