@@ -470,9 +470,14 @@ class AgentViewerDispatcher < EventHandler
     coords = Vector2.new(event.x, event.y)
 
     @viewer.editor_at_pixel?(coords) do |editor|
+      editor.focus
       # TODO: make editors IDraggable instead of having another Draggable module
       editor.handle(event)
       return
+    end
+
+    unless @viewer.protoplasm_at_pixel?(coords) && @viewer.editor_open?
+      @viewer.editor &.blur
     end
 
     if agent = @viewer.find_at_pixel?(coords, entity: Agent)
@@ -510,6 +515,14 @@ class AgentViewerDispatcher < EventHandler
 
   def handle(event : SF::Event::KeyPressed)
     @shift = event.shift || event.code.l_shift? || event.code.r_shift?
+
+    case event.code
+    when .escape?
+      if @viewer.editor_open?
+        @viewer.editor &.blur
+        return
+      end
+    end
 
     forward(event)
   end
@@ -685,8 +698,8 @@ class EditorPanel
 
   @offset : Vector2
 
-  def initialize(@editor : Editor)
-    @offset = Vector2.new(@editor.size/2)
+  def initialize(@viewer : AgentViewer, @editor : Editor)
+    @offset = Vector2.new(@editor.size/2) + (viewer.size.y / 4).y
   end
 
   def lift(mouse : Vector2)
@@ -707,6 +720,13 @@ end
 
 abstract class AgentEdge
   abstract def each_agent(& : Agent ->)
+
+  def find?(needle : T.class) : T? forall T
+    each_agent do |agent|
+      next unless agent.is_a?(T)
+      return agent
+    end
+  end
 
   def summon
     @viewer.insert(self)
@@ -849,7 +869,7 @@ class AgentViewer
   @editor : EditorPanel?
 
   def register(editor : Editor)
-    @states[editor.object_id] = EditorPanel.new(editor)
+    @states[editor.object_id] = EditorPanel.new(self, editor)
   end
 
   def unregister(editor : Editor)
