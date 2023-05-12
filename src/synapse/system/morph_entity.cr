@@ -35,7 +35,7 @@ abstract class MorphEntity < PhysicalEntity
     nil
   end
 
-  def suicide
+  def dismiss
     super
 
     @tank.remove(self, @shape)

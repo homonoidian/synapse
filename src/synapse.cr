@@ -580,7 +580,7 @@ class Mode::Slaying < Mode
     when .left?
       released_on = app.tank.find_cell_at?(coords)
       if released_on && @pressed_on.same?(released_on)
-        released_on.suicide
+        released_on.dismiss
       end
     end
 

@@ -196,7 +196,7 @@ class CellAvatar < CircularEntity
     nil
   end
 
-  def suicide
+  def dismiss
     super
 
     @cell.died(avatar: self)
@@ -207,7 +207,7 @@ class CellAvatar < CircularEntity
   def receive(vesicle : Vesicle)
     @cell.receive(avatar: self, vesicle: vesicle)
   rescue CommitSuicide
-    suicide
+    dismiss
   end
 
   def fail(err : ErrResult)
@@ -251,14 +251,14 @@ class CellAvatar < CircularEntity
   def systole
     @cell.systole(avatar: self)
   rescue CommitSuicide
-    suicide
+    dismiss
   end
 
   # :ditto:
   def dyastole
     @cell.dyastole(avatar: self)
   rescue CommitSuicide
-    suicide
+    dismiss
   end
 
   @__texture = SF::RenderTexture.new(600, 400)

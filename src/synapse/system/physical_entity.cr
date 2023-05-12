@@ -108,7 +108,7 @@ abstract class PhysicalEntity < Entity
     nil
   end
 
-  def suicide
+  def dismiss
     super
 
     @tank.remove(self, @body)

@@ -23,8 +23,8 @@ abstract class Entity
 
     # Remember the decay task id so that users can query it.
     #
-    # Commit suicide after we're past the desired lifespan.
-    @decay = @watch.after(lifespan) { suicide }
+    # Dismiss after we're past the desired lifespan.
+    @decay = @watch.after(lifespan) { dismiss }
   end
 
   # Specifies the z-index of this kind of entity, that is, how
@@ -60,7 +60,7 @@ abstract class Entity
   # Removes this entity from the tank.
   #
   # Be careful not to call this method if this entity is not in the tank.
-  def suicide
+  def dismiss
     # Important! Unregister timer if we've still not reached it.
     @decay.try { |id| @watch.cancel(id) }
     @tank.remove(self)
