@@ -1,8 +1,12 @@
 # Keyword rule header state. Allows the user to enter the keyword
 # and parameters of a `KeywordSignature`.
 class KeywordRuleHeaderState < RuleHeaderState
+  # Returns the keyword. May be empty is the user didn't enter it yet.
+  def keyword : String
+    @states[0].as(KeywordInputState).string
+  end
+  
   def to_rule_signature : RuleSignature
-    keyword = @states[0].as(KeywordInputState).string
     params = @states[1..].map { |state| state.as(ParamInputState).string }
 
     KeywordRuleSignature.new(keyword, params)

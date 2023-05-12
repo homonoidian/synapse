@@ -83,6 +83,10 @@ abstract class Tank
     @entities.at?(pos)
   end
 
+  def find_at?(pos : Vector2)
+    @entities.at?(pos)
+  end
+
   def find_at?(pos : Vector2, type : T.class) forall T
     @entities.at?(T, pos)
   end
@@ -94,6 +98,10 @@ abstract class Tank
     end
   end
 
+  def insert(constraint : CP::Constraint)
+    @space.add(constraint)
+  end
+
   def insert(entity : Entity)
     @entities.insert(entity)
   end
@@ -103,6 +111,10 @@ abstract class Tank
     if object.is_a?(CP::Body)
       @bodies.delete(object.object_id)
     end
+  end
+
+  def remove(constraint : CP::Constraint)
+    @space.delete(constraint)
   end
 
   def remove(entity : Entity)

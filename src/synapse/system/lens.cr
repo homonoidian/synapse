@@ -107,6 +107,10 @@ struct Lens::Focused < Lens
     @object === object
   end
 
+  def aiming_at?(cls : T.class) forall T
+    @object.is_a?(T)
+  end
+
   def configure(view : SF::View) : SF::View
     @object.into(view)
   end

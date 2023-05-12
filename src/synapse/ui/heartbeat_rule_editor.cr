@@ -1,6 +1,11 @@
 # State for a heartbeat rule editor. Almost identical to
 # `KeywordRuleEditorState`, hence the subclassing.
 class HeartbeatRuleEditorState < KeywordRuleEditorState
+  def period?
+    header = @states[0].as(HeartbeatRuleHeaderState)
+    header.period?
+  end
+
   def to_rule(signature : RuleSignature, code : String) : Rule
     HeartbeatRule.new(signature, code)
   end
@@ -30,6 +35,10 @@ class HeartbeatRuleEditor < RuleEditor
   include KeywordRuleEditorHandler
   include CellEditorEntity
   include RuleEditorHandler
+
+  def title? : String?
+    @state.period?
+  end
 
   def to_rule : Rule
     @state.to_rule

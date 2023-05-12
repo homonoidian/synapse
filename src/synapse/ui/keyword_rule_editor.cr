@@ -10,6 +10,12 @@ class KeywordRuleEditorState < RuleEditorState
     2 # Rule header + rule code
   end
 
+  # Returns the keyword. May be empty if the user didn't enter it yet.
+  def keyword : String
+    header = @states[0].as(RuleHeaderState)
+    header.keyword
+  end
+
   def to_rule(signature : RuleSignature, code : String) : Rule
     KeywordRule.new(signature, code)
   end
@@ -184,6 +190,11 @@ class KeywordRuleEditor < RuleEditor
   include KeywordRuleEditorHandler
   include CellEditorEntity
   include RuleEditorHandler
+
+  def title? : String?
+    keyword = @state.keyword
+    keyword.empty? ? nil : keyword
+  end
 
   def to_rule : Rule
     @state.to_rule

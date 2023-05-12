@@ -40,6 +40,11 @@ class ProtocolEditorState < InputFieldRowState
     super()
   end
 
+  # Returns the protocol name. Can be empty.
+  def name
+    @states[0].as(ProtocolNameEditorState).string
+  end
+
   def capture
     ProtocolEditorInstant.new(super, @id, @enabled)
   end
@@ -53,8 +58,6 @@ class ProtocolEditorState < InputFieldRowState
   end
 
   def protocol_from(collection : ProtocolCollection)
-    name = @states[0].as(ProtocolNameEditorState).string
-
     unless protocol = collection[@id]?
       protocol = Protocol.new(@id, name, @enabled)
       collection.summon(protocol)
@@ -207,7 +210,7 @@ end
 
 # Protocol editor allows to create and edit protocols, which
 # are, simply speaking, "umbrellas" for rules.
-class ProtocolEditor
+class ProtocolEditor < Editor
   include MonoBufferController(ProtocolEditorState, ProtocolEditorView)
   include BufferEditorHandler
   include BufferEditorRowHandler
@@ -215,6 +218,11 @@ class ProtocolEditor
   include CellEditorEntity
 
   delegate :halo?, :halo=, to: @view
+
+  def title? : String?
+    name = @state.name
+    name.empty? ? nil : name
+  end
 
   def append(rule : Rule, to collection : ProtocolCollection)
     protocol = @state.protocol_from(collection)

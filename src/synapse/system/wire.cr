@@ -13,6 +13,10 @@ class Wire < Entity
     -1
   end
 
+  def includes?(point : Vector2)
+    false
+  end
+
   def sync
     @drawable = SF::VertexArray.new(SF::Lines)
     @drawable.append(SF::Vertex.new(@src.mid.sf, @color))

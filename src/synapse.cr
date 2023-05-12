@@ -56,6 +56,7 @@ require "./synapse/ui/view"
 require "./synapse/ui/dimension"
 require "./synapse/ui/controller"
 
+require "./synapse/ui/editor"
 require "./synapse/ui/buffer_editor"
 require "./synapse/ui/buffer_editor_row"
 require "./synapse/ui/buffer_editor_column"

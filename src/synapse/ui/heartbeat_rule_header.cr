@@ -33,8 +33,12 @@ class HeartbeatRuleHeaderState < KeywordRuleHeaderState
     drop
   end
 
+  def period? : String?
+    @states[1]?.as?(PeriodInputState).try &.string
+  end
+
   def to_rule_signature
-    period = @states[1]?.as?(PeriodInputState).try &.string
+    period = period?
 
     return HeartbeatRuleSignature.new(period: nil) unless period
 
