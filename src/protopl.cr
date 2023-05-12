@@ -143,7 +143,7 @@ abstract class Agent < CircularEntity
   def register(viewer : AgentViewer)
     viewer.register(@editor)
   end
-  
+
   def unregister(viewer : AgentViewer)
     viewer.unregister(@editor)
   end
@@ -184,7 +184,7 @@ abstract class Agent < CircularEntity
   def drag(delta : Vector2, mouse : Vector2)
     # We don't use delta because physics influences our position
     # too, so we want to be authoritative.
-    self.mid = mouse 
+    self.mid = mouse
   end
 
   def drop(mouse : Vector2)
@@ -210,7 +210,7 @@ abstract class Agent < CircularEntity
   def connect(*, to other : Agent, in viewer : AgentViewer)
   end
 
-  def spring(*, to other : Agent, **kwargs) 
+  def spring(*, to other : Agent, **kwargs)
     other.spring(@body, **kwargs)
   end
 
@@ -371,7 +371,7 @@ class Halo
 end
 
 class EndHandlingEvent < Exception
-  # Returns the event whose handling should end. 
+  # Returns the event whose handling should end.
   getter event : SF::Event
 
   def initialize(@event)
@@ -468,7 +468,6 @@ class AgentViewerDispatcher < EventHandler
     return unless event.clicks == 1
 
     coords = Vector2.new(event.x, event.y)
-
 
     @viewer.editor_at_pixel?(coords) do |editor|
       # TODO: make editors IDraggable instead of having another Draggable module
@@ -623,11 +622,11 @@ end
 
 class SingleEdgeBuilder < EdgeBuilder
   def handle(event : SF::Event::MouseButtonReleased)
-    other = @viewer.find_at_pixel?(Vector2.new(event.x, event.y))
+    other = @viewer.find_at_pixel?(Vector2.new(event.x, event.y), entity: Agent)
 
     # If the user didn't click at an entity (and maybe clicked on void),
     # then cancel.
-    unless other.is_a?(Agent) && @agent.compatible?(other, in: @viewer)
+    unless other && @agent.compatible?(other, in: @viewer)
       cancel
 
       raise EndHandlingEvent.new(event)
@@ -794,7 +793,7 @@ class AgentViewer
     @screen = SF::RenderTexture.new(size.x.to_i, size.y.to_i, SF::ContextSettings.new(depth: 24, antialiasing: 8))
     @canvas = SF::RenderTexture.new((size.x * 0.6).to_i, size.y.to_i, SF::ContextSettings.new(depth: 24, antialiasing: 8))
     @rpanel = SF::RenderTexture.new((size.x * 0.4).to_i, size.y.to_i, SF::ContextSettings.new(depth: 24, antialiasing: 8))
-    
+
     @protoplasm = Protoplasm.new
 
     kw = KeywordRuleAgent.new(@protoplasm)
@@ -880,7 +879,7 @@ class AgentViewer
 
     editor do |prev|
       next if prev.same?(editor)
-      
+
       prev.blur
 
       # Gracefully close the previous editor if the new editor
@@ -908,7 +907,7 @@ class AgentViewer
       prev.blur
 
       close(prev)
-      
+
       @editor = nil
     end
   end
@@ -922,7 +921,7 @@ class AgentViewer
   end
 
   def inspect(entity : Entity?)
-    inspect(entity) { } 
+    inspect(entity) { }
   end
 
   delegate :each_agent, to: @protoplasm
@@ -961,7 +960,7 @@ class AgentViewer
     return unless state = @editor
 
     editor = state.editor
-    coords = Vector2.new @rpanel.map_pixel_to_coords((pixel - @canvas.size.x.x).sfi) 
+    coords = Vector2.new @rpanel.map_pixel_to_coords((pixel - @canvas.size.x.x).sfi)
 
     if editor.includes?(coords.sf)
       yield editor
@@ -1056,7 +1055,6 @@ class AgentViewer
     rpanel_splitter.size = SF.vector2f(2, @canvas.size.y / 2)
     rpanel_splitter.position = rpanel.position + SF.vector2f(4, @canvas.size.y/4)
     rpanel_splitter.fill_color = @protoplasm.inspecting?(nil) ? SF::Color.new(0x45, 0x45, 0x45) : SF::Color.new(0x43, 0x51, 0x80)
-
 
     @screen.draw(rpanel_splitter)
 
