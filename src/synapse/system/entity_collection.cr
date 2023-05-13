@@ -7,6 +7,15 @@
 class EntityCollection
   @entities = {} of Entity.class => Hash(UUID, Entity)
 
+  # TODO: remove
+  def sample(type : T.class) : T forall T
+    population = [] of T
+    each(type) do |entity|
+      population << entity
+    end
+    population.sample
+  end
+
   # Returns the amount of entities of the given *type* in this collection.
   def count(type : T.class) forall T
     @entities[T]?.try &.size || 0

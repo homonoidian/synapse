@@ -39,6 +39,7 @@ module Icon
   GenericAdd    = "\uECC8"
   KeywordRule   = "\uF106"
   HeartbeatRule = "\uEE0A"
+  Paused        = "\uEFD5"
 end
 
 # Implements `icon_font` and a few other methods from `IIconView`

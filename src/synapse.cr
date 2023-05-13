@@ -70,6 +70,9 @@ require "./synapse/ui/input_field_row"
 require "./synapse/ui/rule_header"
 require "./synapse/ui/keyword_rule_header"
 require "./synapse/ui/keyword_rule_editor"
+require "./synapse/ui/label"
+require "./synapse/ui/menu_item"
+require "./synapse/ui/menu"
 
 require "./synapse/ui/*"
 
