@@ -41,7 +41,7 @@ abstract class Tank
   end
 
   def inspect(object : Inspectable?)
-    inspect(object) {}
+    inspect(object) { }
   end
 
   def inspect(object : Inspectable?, &)
@@ -61,6 +61,12 @@ abstract class Tank
 
   def each_entity
     @entities.each do |entity|
+      yield entity
+    end
+  end
+
+  def each_entity(type : T.class) forall T
+    @entities.each(T) do |entity|
       yield entity
     end
   end
@@ -114,7 +120,7 @@ abstract class Tank
   end
 
   def remove(constraint : CP::Constraint)
-    @space.delete(constraint)
+    @space.remove(constraint)
   end
 
   def remove(entity : Entity)

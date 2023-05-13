@@ -88,6 +88,30 @@ class Protoplasm < Tank
       yield agent
     end
   end
+
+  def inspect_prev_agent(*, in viewer : AgentViewer)
+    @lens.each do |agent|
+      next unless agent.is_a?(Agent)
+
+      if pred = agent.pred?(in: viewer)
+        inspect pred
+      end
+
+      break
+    end
+  end
+
+  def inspect_next_agent(*, in viewer : AgentViewer)
+    @lens.each do |agent|
+      next unless agent.is_a?(Agent)
+
+      if succ = agent.succ?(in: viewer)
+        inspect(succ)
+      end
+
+      break
+    end
+  end
 end
 
 module IDraggable
@@ -146,6 +170,12 @@ abstract class Agent < CircularEntity
   end
 
   protected abstract def to_editor : Editor
+
+  def pred?(*, in viewer : AgentViewer)
+  end
+
+  def succ?(*, in viewer : AgentViewer)
+  end
 
   def register(viewer : AgentViewer)
     viewer.register(@editor)
@@ -324,6 +354,56 @@ class ProtocolAgent < Agent
     @editor.title? || "Untitled"
   end
 
+  def succ?(*, in viewer : AgentViewer)
+    candidate = nil
+    distance = nil
+
+    @tank.each_entity(ProtocolAgent) do |agent|
+      next unless agent.mid.x > mid.x || ((agent.mid.x - mid.x).abs < 8 && agent.mid.y > mid.y)
+      if distance.nil? || (agent.mid - mid).magn < distance
+        candidate = agent
+      end
+    end
+
+    candidate
+  end
+
+  def pred?(*, in viewer : AgentViewer)
+    candidate = nil
+    distance = nil
+
+    @tank.each_entity(ProtocolAgent) do |agent|
+      next unless agent.mid.x < mid.x || ((agent.mid.x - mid.x).abs < 8 && agent.mid.y < mid.y)
+      if distance.nil? || (agent.mid - mid).magn < distance
+        candidate = agent
+      end
+    end
+
+    candidate
+  end
+
+  def pred?(of agent : RuleAgent, in viewer : AgentViewer)
+    distance = nil
+    candidate = nil
+    viewer.each_rule(of: self) do |rule|
+      next unless rule.mid.x < agent.mid.x || ((rule.mid.x - agent.mid.x).abs < 8 && rule.mid.y < agent.mid.y)
+      if distance.nil? || (rule.mid - agent.mid).magn < distance
+        candidate = rule
+      end
+    end
+    candidate
+  end
+
+  def succ?(of agent : RuleAgent, in viewer : AgentViewer)
+    distance = nil
+    candidate = nil
+    viewer.each_rule(of: self) do |rule|
+      next unless rule.mid.x > agent.mid.x || ((rule.mid.x - agent.mid.x).abs < 8 && rule.mid.y > agent.mid.y)
+      return rule
+    end
+    candidate
+  end
+
   protected def to_editor : ProtocolEditor
     ProtocolEditor.new(ProtocolEditorState.new, ProtocolEditorView.new)
   end
@@ -346,6 +426,36 @@ class ProtocolAgent < Agent
 end
 
 abstract class RuleAgent < Agent
+  def succ?(*, in viewer : AgentViewer)
+    candidate = nil
+    distance = nil
+
+    viewer.each_protocol(of: self) do |protocol|
+      next unless succ = protocol.succ?(of: self, in: viewer)
+
+      if distance.nil? || (succ.mid - mid).magn < distance
+        candidate = succ
+      end
+    end
+
+    candidate
+  end
+
+  def pred?(*, in viewer : AgentViewer)
+    candidate = nil
+    distance = nil
+
+    viewer.each_protocol(of: self) do |protocol|
+      next unless pred = protocol.pred?(of: self, in: viewer)
+
+      if distance.nil? || (pred.mid - mid).magn < distance
+        candidate = pred
+      end
+    end
+
+    candidate
+  end
+
   def compatible?(other : ProtocolAgent, in viewer : AgentViewer)
     other.compatible?(self, in: viewer)
   end
@@ -551,7 +661,7 @@ class AgentSummoner < EventHandler
 
   def cancel
     @agent.drop(@agent.mid)
-    @agent.dismiss
+    @viewer.dismiss(@agent)
     @handlers.unregister(self)
   end
 
@@ -579,8 +689,56 @@ class AgentSummoner < EventHandler
   end
 end
 
+class AgentDismisser < EventHandler
+  def initialize(handlers : EventHandlerStore, @viewer : AgentViewer)
+    super(handlers)
+
+    @cursor = SF::Cursor.from_system(SF::Cursor::Type::Cross)
+    @viewer.push_cursor(@cursor)
+  end
+
+  def dismiss
+    @viewer.pop_cursor(@cursor)
+    @handlers.unregister(self)
+  end
+
+  def major?
+    true
+  end
+
+  def handle(event : SF::Event::MouseButtonPressed)
+    unless event.clicks == 1 && event.button.left?
+      dismiss
+      return
+    end
+
+    coords = event.x.at(event.y)
+
+    if agent = @viewer.find_at_pixel?(coords, entity: Agent)
+      @viewer.dismiss(agent)
+    end
+
+    dismiss
+
+    raise EndHandlingEvent.new(event)
+  end
+
+  def handle(event : SF::Event::KeyPressed)
+    case event.code
+    when .escape?, .backspace?, .delete?, .enter?
+      dismiss
+      raise EndHandlingEvent.new(event)
+    else
+    end
+  end
+
+  def handle(event : SF::Event)
+    raise EndHandlingEvent.new(event)
+  end
+end
+
 class SummonMenuDispatcher < EventHandler
-  def initialize(handlers : EventHandlerStore, @viewer : AgentViewer, pixel : Vector2)
+  def initialize(handlers : EventHandlerStore, @viewer : AgentViewer, pixel : Vector2, @parent : ProtocolAgent? = nil)
     super(handlers)
 
     #
@@ -617,11 +775,23 @@ class SummonMenuDispatcher < EventHandler
     true
   end
 
+  def summon(cls : RuleAgent.class, at pixel : Vector2)
+    if protocol = @parent.as?(ProtocolAgent)
+      agent = @viewer.summon(cls, at: pixel)
+      @viewer.inspect(agent)
+      protocol.connect(to: agent, in: @viewer)
+    else
+      @handlers.register AgentSummoner.new(@handlers, @viewer, agent: cls, pixel: pixel)
+    end
+  end
+
+  def summon(cls : Agent.class, at pixel : Vector2)
+    @handlers.register AgentSummoner.new(@handlers, @viewer, agent: cls, pixel: pixel)
+  end
+
   # Accepts the given menu *option*: registers the appropriate
   # `AgentSummoner` and closes the menu.
   def accept(option : String)
-    mouse = @viewer.mouse
-
     cls = {
       "New birth rule":     BirthRuleAgent,
       "New keyword rule":   KeywordRuleAgent,
@@ -629,7 +799,7 @@ class SummonMenuDispatcher < EventHandler
       "New protocol":       ProtocolAgent,
     }[option]
 
-    @handlers.register AgentSummoner.new(@handlers, @viewer, agent: cls, pixel: mouse)
+    summon(cls, at: @viewer.mouse)
 
     cancel
   end
@@ -643,6 +813,8 @@ class SummonMenuDispatcher < EventHandler
   # Forwards the given *event* to the menu.
   def forward(event : SF::Event)
     @menu.handle(event)
+
+    raise EndHandlingEvent.new(event)
   end
 
   def handle(event : SF::Event::MouseButtonPressed)
@@ -735,6 +907,15 @@ class AgentViewerDispatcher < EventHandler
     when .escape?
       if @viewer.editor_open?
         @viewer.editor &.blur
+        return
+      end
+    when .delete?
+      unless @viewer.editor_open?
+        @handlers.register AgentDismisser.new(@handlers, @viewer)
+      end
+    when .tab?
+      if event.control
+        @shift ? @viewer.to_prev_agent : @viewer.to_next_agent
         return
       end
     end
@@ -858,11 +1039,23 @@ end
 
 class SingleEdgeBuilder < EdgeBuilder
   def handle(event : SF::Event::MouseButtonReleased)
-    other = @viewer.find_at_pixel?(Vector2.new(event.x, event.y), entity: Agent)
+    coords = Vector2.new(event.x, event.y)
+    other = @viewer.find_at_pixel?(coords, entity: Agent)
 
     # If the user didn't click at an entity (and maybe clicked on void),
-    # then cancel.
-    unless other && @agent.compatible?(other, in: @viewer)
+    # give them the summon menu.
+    unless other
+      cancel
+
+      if protocol = @agent.as?(ProtocolAgent)
+        @handlers.register(SummonMenuDispatcher.new(@handlers, @viewer, coords, parent: protocol))
+      end
+
+      raise EndHandlingEvent.new(event)
+    end
+
+    # Cancel if over an agent but not compatible.
+    unless @agent.compatible?(other, in: @viewer)
       cancel
 
       raise EndHandlingEvent.new(event)
@@ -878,15 +1071,17 @@ end
 
 class MultiEdgeBuilder < EdgeBuilder
   def handle(event : SF::Event::MouseButtonPressed)
-    other = @viewer.find_at_pixel?(Vector2.new(event.x, event.y))
+    coords = Vector2.new(event.x, event.y)
+    other = @viewer.find_at_pixel?(coords)
 
     # If the user didn't click at an entity (and maybe clicked on void),
-    # then cancel and end handling the event -- so anyone else doesn't
-    # get the click.
-    #
-    # TODO: open the menu instead
+    # give them the summon menu.
     unless other
       cancel
+
+      if protocol = @agent.as?(ProtocolAgent)
+        @handlers.register(SummonMenuDispatcher.new(@handlers, @viewer, coords, parent: protocol))
+      end
 
       raise EndHandlingEvent.new(event)
     end
@@ -946,6 +1141,9 @@ class EditorPanel
 end
 
 abstract class AgentEdge
+  def initialize(@viewer : AgentViewer)
+  end
+
   abstract def each_agent(& : Agent ->)
 
   def find?(needle : T.class) : T? forall T
@@ -953,6 +1151,18 @@ abstract class AgentEdge
       next unless agent.is_a?(T)
       return agent
     end
+  end
+
+  def contains?(vertex : Agent)
+    each_agent do |agent|
+      return true if vertex == agent
+    end
+
+    false
+  end
+
+  def contains?(*vertices : Agent)
+    vertices.all? { |vertex| contains?(vertex) }
   end
 
   def summon
@@ -971,7 +1181,8 @@ end
 class AgentPointEdge < AgentEdge
   property point : Vector2
 
-  def initialize(@viewer : AgentViewer, @agent : Agent, @point)
+  def initialize(viewer : AgentViewer, @agent : Agent, @point)
+    super(viewer)
   end
 
   def each_agent(& : Agent ->)
@@ -991,7 +1202,9 @@ end
 abstract class AgentAgentConstraint < AgentEdge
   @constraint : CP::Constraint
 
-  def initialize(@viewer : AgentViewer, @left : Agent, @right : Agent)
+  def initialize(viewer : AgentViewer, @left : Agent, @right : Agent)
+    super(viewer)
+
     @constraint = constraint
   end
 
@@ -1000,14 +1213,6 @@ abstract class AgentAgentConstraint < AgentEdge
   def each_agent(& : Agent ->)
     yield @left
     yield @right
-  end
-
-  def contains?(*vertices : Agent)
-    each_agent do |agent|
-      return false unless agent.in?(vertices)
-    end
-
-    true
   end
 
   def summon
@@ -1217,7 +1422,7 @@ class AgentViewer
   # Returns the size of this viewer in pixels.
   getter size : Vector2
 
-  def initialize(@mouse : BoxedVector2, @size : Vector2)
+  def initialize(@window : SF::RenderWindow, @mouse : BoxedVector2, @size : Vector2)
     # Allocate 40% of width to the right-hand side editor panel, and
     # leave the rest to the protoplasm.
     @screen = SF::RenderTexture.new(size.x.to_i, size.y.to_i, SF::ContextSettings.new(depth: 24, antialiasing: 8))
@@ -1245,6 +1450,18 @@ class AgentViewer
     pa.mid = 200.at(300)
     pa.register(self)
     pa.summon
+  end
+
+  @cursors = [] of SF::Cursor
+
+  def push_cursor(cursor : SF::Cursor)
+    @cursors << cursor
+    @window.mouse_cursor = cursor
+  end
+
+  def pop_cursor(cursor : SF::Cursor)
+    @cursors.delete_at(@cursors.rindex(cursor) || raise "cursor was not pushed: #{cursor}")
+    @window.mouse_cursor = @cursors.last? || SF::Cursor.from_system(SF::Cursor::Type::Arrow)
   end
 
   @graph = {} of ProtocolAgent => Array(RuleAgent)
@@ -1304,6 +1521,72 @@ class AgentViewer
     agent
   end
 
+  def dismiss(agent : Agent)
+    edit(entity: nil)
+
+    agent.unregister(self)
+
+    # Break edges that agent participates in
+    @edges = @edges.reject do |edge|
+      if reject = edge.contains?(agent)
+        edge.dismiss
+      end
+
+      reject
+    end.to_set
+
+    agent.dismiss
+
+    if agent.is_a?(ProtocolAgent)
+      return unless rules = @graph[agent]?
+
+      # This thing is like O(Infinity) maan ...
+      rules.each_combination(2, reuse: true) do |(a, b)|
+        @edges = @edges.reject do |edge|
+          if reject = edge.contains?(a, b)
+            edge.dismiss
+          end
+
+          reject
+        end.to_set
+      end
+
+      @graph.delete(agent)
+
+      return
+    end
+
+    @graph.reject! do |protocol, rules|
+      rules.any? &.same?(agent)
+    end
+  end
+
+  def to_prev_agent
+    @protoplasm.inspect_prev_agent(in: self)
+  end
+
+  def to_next_agent
+    @protoplasm.inspect_next_agent(in: self)
+  end
+
+  def each_rule(*, of protocol : ProtocolAgent, &)
+    return unless rules = @graph[protocol]?
+
+    rules.each do |rule|
+      yield rule
+    end
+  end
+
+  def each_protocol(*, of agent : RuleAgent, &)
+    @graph.each do |protocol, rules|
+      rules.each do |rule|
+        next unless agent.same?(rule)
+
+        yield protocol
+      end
+    end
+  end
+
   def has_edge?(left : ProtocolAgent, right : RuleAgent)
     @edges.any? { |edge| edge.is_a?(AgentAgentEdge) && edge.contains?(left, right) }
   end
@@ -1341,6 +1624,12 @@ class AgentViewer
 
   def editor_open?
     !!@editor
+  end
+
+  def editor_focused?
+    editor { |editor| return editor.focused? }
+
+    false
   end
 
   def editor_open?(editor : Editor)
@@ -1571,7 +1860,7 @@ handlers = EventHandlerStore.new
 
 mouse = BoxedVector2.new(0.at(0))
 
-viewer = AgentViewer.new(mouse, 700.at(400))
+viewer = AgentViewer.new(window, mouse, 700.at(400))
 viewer.register(handlers)
 a = viewer.@protoplasm.@entities.sample(Agent)
 a.pause
@@ -1592,8 +1881,8 @@ b.fail("This is an example of another error message #6")
 # [x] implement error overlay & halo for one or more errors
 # [x] when an agent is paused (a boolean flag), it's darkened and a "paused"
 #     icon appears on it
-# [ ] implement deletion of agents/protocols
-# [ ] implement Tab & quicknav
+# [x] implement deletion of agents/protocols
+# [x] implement C-Tab/C-S-Tab
 # [ ] bridge with protocols & rules: be able to initialize a agentviewer
 #     from a protocolcollection & keep it there, agents own rules/protocols?
 # [ ] when agentviewer receives message, it forwards to matching protocol?
