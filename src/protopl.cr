@@ -69,6 +69,8 @@ require "./synapse/ui/*"
 
 require "./ped2"
 
+require "./synapse/system/protoplasm/agent_graph"
+
 struct SF::Event::MouseButtonPressed
   property clicks : Int32 = 1
 end
@@ -417,7 +419,7 @@ class ProtocolAgent < Agent
   end
 
   def compatible?(other : RuleAgent, in viewer : AgentViewer)
-    !viewer.has_edge?(self, other)
+    !viewer.connected?(self, other)
   end
 
   def connect(*, to other : RuleAgent, in viewer : AgentViewer)
@@ -979,12 +981,12 @@ class EdgeCreator < EventHandler
 end
 
 abstract class EdgeBuilder < EventHandler
+  @edge : AgentPointEdge
+
   def initialize(handlers : EventHandlerStore, @viewer : AgentViewer, @agent : Agent)
     super(handlers)
 
-    @edge = AgentPointEdge.new(@viewer, @agent, @agent.mid)
-    @edge.summon
-
+    @edge = @viewer.connect(@agent, @agent.mid)
     @halos = [] of Halo
 
     #
@@ -1141,7 +1143,7 @@ class EditorPanel
 end
 
 abstract class AgentEdge
-  def initialize(@viewer : AgentViewer)
+  def initialize(@graph : AgentGraph)
   end
 
   abstract def each_agent(& : Agent ->)
@@ -1165,12 +1167,18 @@ abstract class AgentEdge
     vertices.all? { |vertex| contains?(vertex) }
   end
 
+  def constrain(tank : Tank)
+  end
+
+  def loosen(tank : Tank)
+  end
+
   def summon
-    @viewer.insert(self)
+    @graph.insert(self)
   end
 
   def dismiss
-    @viewer.delete(self)
+    @graph.remove(self)
   end
 
   def color
@@ -1181,8 +1189,8 @@ end
 class AgentPointEdge < AgentEdge
   property point : Vector2
 
-  def initialize(viewer : AgentViewer, @agent : Agent, @point)
-    super(viewer)
+  def initialize(graph : AgentGraph, @agent : Agent, @point)
+    super(graph)
   end
 
   def each_agent(& : Agent ->)
@@ -1202,29 +1210,25 @@ end
 abstract class AgentAgentConstraint < AgentEdge
   @constraint : CP::Constraint
 
-  def initialize(viewer : AgentViewer, @left : Agent, @right : Agent)
-    super(viewer)
+  def initialize(graph : AgentGraph, @a : Agent, @b : Agent)
+    super(graph)
 
     @constraint = constraint
   end
 
   abstract def constraint : CP::Constraint
 
+  def constrain(tank : Tank)
+    tank.insert(@constraint)
+  end
+
+  def loosen(tank : Tank)
+    tank.remove(@constraint)
+  end
+
   def each_agent(& : Agent ->)
-    yield @left
-    yield @right
-  end
-
-  def summon
-    super
-
-    @viewer.@protoplasm.insert(@constraint)
-  end
-
-  def dismiss
-    super
-
-    @viewer.@protoplasm.remove(@constraint)
+    yield @a
+    yield @b
   end
 
   def visible?
@@ -1234,16 +1238,16 @@ abstract class AgentAgentConstraint < AgentEdge
   def append(*, to array)
     return unless visible?
 
-    array.append(SF::Vertex.new(@left.mid.sf, color))
-    array.append(SF::Vertex.new(@right.mid.sf, color))
+    array.append(SF::Vertex.new(@a.mid.sf, color))
+    array.append(SF::Vertex.new(@b.mid.sf, color))
   end
 
-  def_equals_and_hash @left, @right
+  def_equals_and_hash @a, @b
 end
 
 class AgentAgentEdge < AgentAgentConstraint
   def constraint : CP::Constraint
-    @left.spring to: @right,
+    @a.spring to: @b,
       length: self.class.length,
       stiffness: self.class.stiffness,
       damping: self.class.damping
@@ -1258,11 +1262,11 @@ class AgentAgentEdge < AgentAgentConstraint
   end
 
   def self.damping
-    100
+    150
   end
 end
 
-class Strut < AgentAgentEdge
+class KeepcloseLink < AgentAgentEdge
   def self.length
     150
   end
@@ -1280,9 +1284,9 @@ class Strut < AgentAgentEdge
   end
 end
 
-class FixedStrut < AgentAgentConstraint
+class KeepawayLink < AgentAgentConstraint
   def constraint : CP::Constraint
-    @left.slide_joint with: @right, min: self.class.min, max: self.class.max
+    @a.slide_joint with: @b, min: self.class.min, max: self.class.max
   end
 
   def self.min
@@ -1430,6 +1434,7 @@ class AgentViewer
     @rpanel = SF::RenderTexture.new((size.x * 0.4).to_i, size.y.to_i, SF::ContextSettings.new(depth: 24, antialiasing: 8))
 
     @protoplasm = Protoplasm.new
+    @graph = AgentGraph.new(@protoplasm)
 
     kw = KeywordRuleAgent.new(@protoplasm)
     kw.mid = 400.at(200)
@@ -1452,6 +1457,8 @@ class AgentViewer
     pa.summon
   end
 
+  delegate :connect, :disconnect, :connected?, :each_protocol, :each_rule, to: @graph
+
   @cursors = [] of SF::Cursor
 
   def push_cursor(cursor : SF::Cursor)
@@ -1462,55 +1469,6 @@ class AgentViewer
   def pop_cursor(cursor : SF::Cursor)
     @cursors.delete_at(@cursors.rindex(cursor) || raise "cursor was not pushed: #{cursor}")
     @window.mouse_cursor = @cursors.last? || SF::Cursor.from_system(SF::Cursor::Type::Arrow)
-  end
-
-  @graph = {} of ProtocolAgent => Array(RuleAgent)
-
-  def connect(protocol : ProtocolAgent, rule : RuleAgent)
-    unless rules = @graph[protocol]?
-      @graph.each_key do |other|
-        strut = FixedStrut.new(self, protocol, other)
-        strut.summon
-      end
-
-      @graph[protocol] = [rule]
-
-      edge = AgentAgentEdge.new(self, protocol, rule)
-      edge.summon
-
-      return
-    end
-
-    rules << rule
-    rules.sort_by! { |rule| rule.mid.x }
-
-    friends = [rule]
-
-    rules.each_cons_pair do |a, b|
-      next unless a.same?(rule) || b.same?(rule)
-
-      friends << b if a.same?(rule)
-      friends << a if b.same?(rule)
-
-      strut = Strut.new(self, a, b)
-      strut.summon
-    end
-
-    rules.each do |other|
-      next if friends.any? &.same?(other)
-
-      strut = FixedStrut.new(self, rule, other)
-      strut.summon
-    end
-
-    edge = AgentAgentEdge.new(self, protocol, rule)
-    edge.summon
-  end
-
-  @edges = Set(AgentEdge).new
-
-  def insert(edge : AgentEdge)
-    @edges << edge
   end
 
   def summon(cls : Agent.class, *, at pixel : Vector2)
@@ -1526,39 +1484,9 @@ class AgentViewer
 
     agent.unregister(self)
 
-    # Break edges that agent participates in
-    @edges = @edges.reject do |edge|
-      if reject = edge.contains?(agent)
-        edge.dismiss
-      end
-
-      reject
-    end.to_set
+    @graph.disconnect(agent)
 
     agent.dismiss
-
-    if agent.is_a?(ProtocolAgent)
-      return unless rules = @graph[agent]?
-
-      # This thing is like O(Infinity) maan ...
-      rules.each_combination(2, reuse: true) do |(a, b)|
-        @edges = @edges.reject do |edge|
-          if reject = edge.contains?(a, b)
-            edge.dismiss
-          end
-
-          reject
-        end.to_set
-      end
-
-      @graph.delete(agent)
-
-      return
-    end
-
-    @graph.reject! do |protocol, rules|
-      rules.any? &.same?(agent)
-    end
   end
 
   def to_prev_agent
@@ -1567,32 +1495,6 @@ class AgentViewer
 
   def to_next_agent
     @protoplasm.inspect_next_agent(in: self)
-  end
-
-  def each_rule(*, of protocol : ProtocolAgent, &)
-    return unless rules = @graph[protocol]?
-
-    rules.each do |rule|
-      yield rule
-    end
-  end
-
-  def each_protocol(*, of agent : RuleAgent, &)
-    @graph.each do |protocol, rules|
-      rules.each do |rule|
-        next unless agent.same?(rule)
-
-        yield protocol
-      end
-    end
-  end
-
-  def has_edge?(left : ProtocolAgent, right : RuleAgent)
-    @edges.any? { |edge| edge.is_a?(AgentAgentEdge) && edge.contains?(left, right) }
-  end
-
-  def delete(edge : AgentEdge)
-    @edges.delete(edge)
   end
 
   @states = {} of UInt64 => EditorPanel
@@ -1780,9 +1682,7 @@ class AgentViewer
   private def refresh
     @canvas.clear(background_color)
     edges = SF::VertexArray.new(SF::Lines)
-    @edges.each do |edge|
-      edge.append(to: edges)
-    end
+    @graph.each_edge &.append(to: edges)
     @canvas.draw(edges)
     @protoplasm.draw(:entities, @canvas)
     # dd = SFMLDebugDraw.new(@canvas)
