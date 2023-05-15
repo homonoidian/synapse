@@ -32,11 +32,20 @@ class BufferEditorState
     @cursor = index.clamp(start_index..end_index)
   end
 
-  # Captures and returns an instant of this state.
+  # Captures and returns an instant of this state. Useful for undo.
   #
   # See `BufferEditorInstant`.
   def capture
     BufferEditorInstant.new(Time.local.to_unix, string, @cursor)
+  end
+
+  # Fills this state from the content of the given *instant*. Useful
+  # for redo or copying state. The opposite of `capture`.
+  def drain(instant : BufferEditorInstant)
+    @buffer = TextBuffer.new(instant.string)
+    @cursor = instant.cursor
+
+    self
   end
 
   # Moves cursor to *index*.

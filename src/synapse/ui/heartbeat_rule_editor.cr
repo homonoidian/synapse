@@ -43,4 +43,8 @@ class HeartbeatRuleEditor < RuleEditor
   def to_rule : Rule
     @state.to_rule
   end
+
+  def drain(source : self)
+    @state.drain(source.@state.capture)
+  end
 end

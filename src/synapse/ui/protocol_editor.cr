@@ -228,4 +228,8 @@ class ProtocolEditor < Editor
     protocol = @state.protocol_from(collection)
     protocol.append(rule)
   end
+
+  def drain(source : self)
+    @state.drain(source.@state.capture)
+  end
 end

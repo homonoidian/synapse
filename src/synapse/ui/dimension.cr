@@ -19,11 +19,11 @@ class DimensionInstant(SubInstant)
   # Returns the timestamp when this instant was captured.
   getter timestamp : Int64
 
-  # Holds the subordinate editor instants when this instant
+  # Holds the subordinate state instants when this instant
   # was captured.
   getter states : Array(SubInstant)
 
-  # Returns which editor was selected when this instant
+  # Returns which state was selected when this instant
   # was captured.
   getter selected : Int32
 
@@ -50,8 +50,24 @@ abstract class DimensionState(State)
 
   # Captures and returns an instant of this dimension.
   #
-  # Useful for undo/redo.
+  # Useful for undo.
   abstract def capture : DimensionInstant
+
+  # Fills this dimension from the content of the given dimension *instant*.
+  #
+  # Useful for redo or copying state. The opposite of `capture`.
+  def drain(instant : DimensionInstant)
+    @states = instant.states.map_with_index do |subinstant, index|
+      # Recursively drain the subinstants into newly created substates.
+      new_substate_for(index)
+        .drain(subinstant)
+        .as(State)
+    end
+
+    @selected = instant.selected
+
+    self
+  end
 
   # Returns whether there are currently no states in this dimension.
   def empty?

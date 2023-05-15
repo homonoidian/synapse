@@ -349,9 +349,39 @@ abstract class Agent < CircularEntity
 
     target.draw(errors)
   end
+
+  # Fills the editor of this agent with the captured content of the
+  # *other* editor.
+  def drain(other : Editor)
+  end
+
+  # Defines the drain method for the given editor *type* stored in
+  # `@editor` at runtime.
+  macro def_drain_as(type)
+    # Fills the editor of this agent with the captured content of
+    # the given `{{type}}`.
+    def drain(editor : {{type}})
+      @editor.as({{type}}).drain(editor)
+    end
+  end
+
+  abstract def replicate(*, in viewer : AgentViewer)
 end
 
 class ProtocolAgent < Agent
+  def_drain_as ProtocolEditor
+
+  def replicate(*, in viewer : AgentViewer)
+    protocol = viewer.summon(ProtocolAgent, at: mid)
+    protocol.drain(@editor)
+
+    viewer.each_rule(of: self) do |rule|
+      rule.replicate(under: protocol, in: viewer)
+    end
+
+    protocol
+  end
+
   def title?
     @editor.title? || "Untitled"
   end
@@ -428,6 +458,18 @@ class ProtocolAgent < Agent
 end
 
 abstract class RuleAgent < Agent
+  def replicate(*, in viewer : AgentViewer)
+    copy = viewer.summon(self.class, at: mid)
+    copy.drain(@editor)
+    copy
+  end
+
+  def replicate(*, under protocol : ProtocolAgent, in viewer : AgentViewer)
+    copy = replicate(in: viewer)
+    copy.connect(to: protocol, in: viewer)
+    copy
+  end
+
   def succ?(*, in viewer : AgentViewer)
     candidate = nil
     distance = nil
@@ -470,6 +512,8 @@ end
 class HeartbeatRuleAgent < RuleAgent
   delegate :title?, to: @editor
 
+  def_drain_as HeartbeatRuleEditor
+
   protected def to_editor : RuleEditor
     HeartbeatRuleEditor.new(HeartbeatRuleEditorState.new, HeartbeatRuleEditorView.new)
   end
@@ -490,6 +534,8 @@ class BirthRuleAgent < RuleAgent
     BirthRuleEditor.new(BirthRuleEditorState.new, BirthRuleEditorView.new)
   end
 
+  def_drain_as BirthRuleEditor
+
   def icon
     Icon::BirthRule
   end
@@ -505,6 +551,8 @@ class KeywordRuleAgent < RuleAgent
   protected def to_editor : RuleEditor
     KeywordRuleEditor.new(KeywordRuleEditorState.new, KeywordRuleEditorView.new)
   end
+
+  def_drain_as KeywordRuleEditor
 
   def icon
     Icon::KeywordRule
@@ -752,7 +800,7 @@ class SummonMenuDispatcher < EventHandler
     #
     # Fill it with the summon options.
     #
-    self.class.fill(@menu)
+    fill(@menu)
 
     #
     # Insert it into the viewer so that the viewer can draw it.
@@ -766,11 +814,16 @@ class SummonMenuDispatcher < EventHandler
   end
 
   # Fills the given *menu* object with summon options.
-  def self.fill(menu : Menu)
+  def fill(menu : Menu)
     menu.append("New birth rule", Icon::BirthRule)
     menu.append("New keyword rule", Icon::KeywordRule)
     menu.append("New heartbeat rule", Icon::HeartbeatRule)
-    menu.append("New protocol", Icon::Protocol)
+
+    # Do not show "New protocol" if there's a parent: this won't make
+    # a lot of sense since protocols can't be parents of protocols.
+    unless @parent
+      menu.append("New protocol", Icon::Protocol)
+    end
   end
 
   def major?
@@ -870,6 +923,10 @@ class AgentViewerDispatcher < EventHandler
     end
 
     if agent = @viewer.find_at_pixel?(coords, entity: Agent)
+      if @ctrl
+        agent = agent.replicate(in: @viewer)
+      end
+
       # Start inspecting the clicked-on agent, and register
       # a drag handler for it.
       @viewer.inspect(agent)
@@ -901,9 +958,11 @@ class AgentViewerDispatcher < EventHandler
   end
 
   @shift = false
+  @ctrl = false
 
   def handle(event : SF::Event::KeyPressed)
     @shift = event.shift || event.code.l_shift? || event.code.r_shift?
+    @ctrl = event.control || event.code.l_control? || event.code.r_control?
 
     case event.code
     when .escape?
@@ -916,7 +975,7 @@ class AgentViewerDispatcher < EventHandler
         @handlers.register AgentDismisser.new(@handlers, @viewer)
       end
     when .tab?
-      if event.control
+      if @ctrl
         @shift ? @viewer.to_prev_agent : @viewer.to_next_agent
         return
       end
@@ -927,6 +986,7 @@ class AgentViewerDispatcher < EventHandler
 
   def handle(event : SF::Event::KeyReleased)
     @shift = false if event.code.l_shift? || event.code.r_shift?
+    @ctrl = false if event.code.l_control? || event.code.r_control?
 
     forward(event)
   end
@@ -1268,7 +1328,7 @@ end
 
 class KeepcloseLink < AgentAgentEdge
   def self.length
-    150
+    3 * Agent.radius
   end
 
   def self.stiffness
@@ -1290,11 +1350,11 @@ class KeepawayLink < AgentAgentConstraint
   end
 
   def self.min
-    150
+    4 * Agent.radius
   end
 
   def self.max
-    300
+    10 * Agent.radius
   end
 
   def visible?
@@ -1783,6 +1843,8 @@ b.fail("This is an example of another error message #6")
 #     icon appears on it
 # [x] implement deletion of agents/protocols
 # [x] implement C-Tab/C-S-Tab
+# [x] implement ctrl-drag to copy rule within protocol and ctrl-drag to
+#     copy entire protocol
 # [ ] bridge with protocols & rules: be able to initialize a agentviewer
 #     from a protocolcollection & keep it there, agents own rules/protocols?
 # [ ] when agentviewer receives message, it forwards to matching protocol?
