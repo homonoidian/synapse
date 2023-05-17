@@ -25,6 +25,12 @@ TODO: Write a description here
 On the GIFs below you'll notice the interesting stuff as well as the bugs/not-working
 stuff. At least have fun watching them haha :)
 
+**A sneak peak of Synapse** :
+
+![Screenshot](./res/screenshot.png)
+
+Important: the following gifs use the old UI, and I'm too lazy to re-record them.
+
 **A lot of cells in a group resembling a fish, demonstrating mass signal transmission and suppression**:
 
 ![Animation of the above](./res/fish.gif)
