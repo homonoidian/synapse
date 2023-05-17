@@ -245,6 +245,8 @@ class ExpressionContext
     # Longjump (sort of) to CellAvatar#receive, systole(), dyastole(),
     # and friends.
     raise CommitSuicide.new
+
+    1
   end
 
   # Summons a complete copy of this cell.

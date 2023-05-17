@@ -1,3 +1,4 @@
+require "./synapse/system/protoplasm/edge"
 require "./synapse/system/protoplasm/agent_graph"
 
 struct SF::Event::MouseButtonPressed
@@ -100,7 +101,7 @@ abstract class Agent < CircularEntity
     16
   end
 
-  # Specifies the color with which this kind of agent should be painted.
+  # Specifies the color in which this kind of agent should be painted.
   def self.color
     SF::Color.new(0x42, 0x42, 0x42)
   end
@@ -116,19 +117,19 @@ abstract class Agent < CircularEntity
     @errors.any?
   end
 
-  # Tells the error message browser of this cell to show the previous
+  # Tells the error message browser of this agent to show the previous
   # error message, if any.
   def to_prev_error
     @errors.to_prev
   end
 
-  # Tells the error message browser of this cell to show the next
+  # Tells the error message browser of this agent to show the next
   # error message, if any.
   def to_next_error
     @errors.to_next
   end
 
-  # Handles failure of this cell with the given error *message*:
+  # Handles failure of this agent with the given error *message*:
   # tells the error message browser to display an error with the
   # given *message*.
   def fail(message : String)
@@ -138,12 +139,16 @@ abstract class Agent < CircularEntity
     halo.summon
   end
 
-  # Clears all error messages on this cell. Removes the error halo.
+  # Clears all reported errors by this agent. Removes the error halo.
   def unfail
     @errors.clear
     @halos.each &.dismiss
   end
 
+  # Returns whether this agent is paused.
+  #
+  # A paused rule is not expressed. A paused protocol does not
+  # let vesicles/messages through.
   getter? paused = false
 
   # Pauses this agent. This means that this agent won't express its
@@ -215,8 +220,8 @@ abstract class Agent < CircularEntity
 
   # Creates an edge between this and *other* agent in *browser*.
   #
-  # Defined as a noop. Subclasses decide for themselves on how (and
-  # with whom) they are going to handle connections.
+  # Defined as a noop on `Agent`. Subclasses decide for themselves on
+  # how (and with whom) they are going to handle connections.
   #
   # Assumes this and other are compatible. If you're unsure, you can
   # check for whether this is the case using `compatible?`.
@@ -242,6 +247,8 @@ abstract class Agent < CircularEntity
       @editor.as({{type}}).drain(editor)
     end
 
+    # Fills the editor of this agent with the content of the given
+    # captured *instant*.
     def drain(instant : {{itype}})
       @editor.as({{type}}).drain(instant)
     end
@@ -1277,166 +1284,6 @@ class EditorPanel
   end
 end
 
-abstract class AgentEdge
-  def initialize(@graph : AgentGraph)
-  end
-
-  abstract def each_agent(& : Agent ->)
-
-  def find?(needle : T.class) : T? forall T
-    each_agent do |agent|
-      next unless agent.is_a?(T)
-      return agent
-    end
-  end
-
-  def contains?(vertex : Agent)
-    each_agent do |agent|
-      return true if vertex == agent
-    end
-
-    false
-  end
-
-  def contains?(*vertices : Agent)
-    vertices.all? { |vertex| contains?(vertex) }
-  end
-
-  def constrain(tank : Tank)
-  end
-
-  def loosen(tank : Tank)
-  end
-
-  def summon
-    @graph.insert(self)
-  end
-
-  def dismiss
-    @graph.remove(self)
-  end
-
-  def color
-    SF::Color.new(0x77, 0x77, 0x77)
-  end
-end
-
-class AgentPointEdge < AgentEdge
-  property point : Vector2
-
-  def initialize(graph : AgentGraph, @agent : Agent, @point)
-    super(graph)
-  end
-
-  def each_agent(& : Agent ->)
-    yield @agent
-  end
-
-  def append(*, to array)
-    array.append(SF::Vertex.new(@agent.mid.sf, color))
-    array.append(SF::Vertex.new(@point.sf, color))
-  end
-
-  def color
-    SF::Color.new(0x43, 0x51, 0x80)
-  end
-end
-
-abstract class AgentAgentConstraint < AgentEdge
-  @constraint : CP::Constraint
-
-  def initialize(graph : AgentGraph, @a : Agent, @b : Agent)
-    super(graph)
-
-    @constraint = constraint
-  end
-
-  abstract def constraint : CP::Constraint
-
-  def constrain(tank : Tank)
-    tank.insert(@constraint)
-  end
-
-  def loosen(tank : Tank)
-    tank.remove(@constraint)
-  end
-
-  def each_agent(& : Agent ->)
-    yield @a
-    yield @b
-  end
-
-  def visible?
-    true
-  end
-
-  def append(*, to array)
-    return unless visible?
-
-    array.append(SF::Vertex.new(@a.mid.sf, color))
-    array.append(SF::Vertex.new(@b.mid.sf, color))
-  end
-
-  def_equals_and_hash @a, @b
-end
-
-class AgentAgentEdge < AgentAgentConstraint
-  def constraint : CP::Constraint
-    @a.spring to: @b,
-      length: self.class.length,
-      stiffness: self.class.stiffness,
-      damping: self.class.damping
-  end
-
-  def self.length
-    100
-  end
-
-  def self.stiffness
-    150
-  end
-
-  def self.damping
-    150
-  end
-end
-
-class KeepcloseLink < AgentAgentEdge
-  def self.length
-    5 * Agent.radius
-  end
-
-  def self.stiffness
-    100
-  end
-
-  def self.damping
-    200
-  end
-
-  def visible?
-    false
-  end
-end
-
-class KeepawayLink < AgentAgentConstraint
-  def constraint : CP::Constraint
-    @a.slide_joint with: @b, min: self.class.min, max: self.class.max
-  end
-
-  def self.min
-    4 * Agent.radius
-  end
-
-  def self.max
-    24 * Agent.radius
-  end
-
-  def visible?
-    false
-  end
-end
-
 class ErrorMessage
   def initialize(@message : String)
     @text = SF::Text.new(@message, FONT_BOLD, 11)
@@ -1798,7 +1645,7 @@ class AgentBrowser
   private def refresh
     @canvas.clear(background_color)
     edges = SF::VertexArray.new(SF::Lines)
-    @graph.each_edge &.append(to: edges)
+    @graph.each_edge &.draw(to: edges)
     @canvas.draw(edges)
     @protoplasm.draw(:entities, @canvas)
     # dd = SFMLDebugDraw.new(@canvas)

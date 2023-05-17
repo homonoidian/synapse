@@ -1,5 +1,8 @@
-# `AgentGraph` keeps track of how different `Agent`s relate to each other
-# in a `Protoplasm`.
+# `AgentGraph` is an unordered graph that keeps track of how different
+# `Agent`s relate to each other in a `Protoplasm`.
+#
+# It also facilitates exploration of the most kind of agent relationship,
+# namely the protocol-rule agent relationship.
 struct AgentGraph
   def initialize(@protoplasm : Protoplasm)
     # Maps protocol agents to rule agents for e.g. rule lookup.
@@ -256,7 +259,7 @@ struct AgentGraph
   # Returns whether this graph (*being an unordered graph*)
   # contains an edge with the given agents *a*, *b*.
   def connected?(a : Agent, b : Agent)
-    @edges.any? { |edge| edge.is_a?(AgentAgentEdge) && edge.contains?(a, b) }
+    @edges.any? { |edge| edge.is_a?(AgentAgentEdge) && edge.all?(a, b) }
   end
 
   # Creates an `AgentPointEdge`: an edge between the given *agent*
@@ -319,7 +322,7 @@ struct AgentGraph
     when RuleAgent
       # Remove all mentions of the rule from the graph.
       @edges.each do |edge|
-        next unless edge.contains?(agent)
+        next unless edge.any?(agent)
 
         # Edge removes itself from the graph when it
         # is dismissed.
