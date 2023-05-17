@@ -1,74 +1,3 @@
-require "colorize"
-
-require "crsfml"
-require "chipmunk"
-require "chipmunk/chipmunk_crsfml"
-require "lua"
-require "lch"
-
-require "./synapse/ext"
-
-module CellEditorEntity # FIXME: ???
-  delegate :position, :position=, to: @view
-
-  def size
-    @view.size
-  end
-
-  def move(position : SF::Vector2)
-    @view.position = position.round
-
-    refresh
-  end
-
-  def lift
-  end
-
-  def drop
-  end
-end
-
-FONT        = SF::Font.from_memory({{read_file("./fonts/code/scientifica.otb")}}.to_slice)
-FONT_BOLD   = SF::Font.from_memory({{read_file("./fonts/code/scientificaBold.otb")}}.to_slice)
-FONT_ITALIC = SF::Font.from_memory({{read_file("./fonts/code/scientificaItalic.otb")}}.to_slice)
-
-FONT_UI        = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Regular.ttf")}}.to_slice)
-FONT_UI_MEDIUM = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Medium.ttf")}}.to_slice)
-FONT_UI_BOLD   = SF::Font.from_memory({{read_file("./fonts/ui/Roboto-Bold.ttf")}}.to_slice)
-
-require "./synapse/util/*"
-require "./synapse/system/lens"
-require "./synapse/system/entity"
-require "./synapse/system/physical_entity"
-require "./synapse/system/morph_entity"
-require "./synapse/system/circular_entity"
-require "./synapse/system/*"
-
-require "./synapse/ui/view"
-require "./synapse/ui/dimension"
-require "./synapse/ui/controller"
-
-require "./synapse/ui/editor"
-require "./synapse/ui/buffer_editor"
-require "./synapse/ui/buffer_editor_row"
-require "./synapse/ui/buffer_editor_column"
-
-require "./synapse/ui/draggable"
-require "./synapse/ui/rule_editor"
-require "./synapse/ui/icon_view"
-
-require "./synapse/ui/input_field"
-require "./synapse/ui/input_field_row"
-require "./synapse/ui/rule_header"
-require "./synapse/ui/keyword_rule_header"
-require "./synapse/ui/keyword_rule_editor"
-require "./synapse/ui/label"
-require "./synapse/ui/menu_item"
-require "./synapse/ui/menu"
-require "./synapse/ui/*"
-
-require "./ped2"
-
 require "./synapse/system/protoplasm/agent_graph"
 
 struct SF::Event::MouseButtonPressed
@@ -91,11 +20,11 @@ class Protoplasm < Tank
     end
   end
 
-  def inspect_prev_agent(*, in viewer : AgentViewer)
+  def inspect_prev_agent(*, in browser : AgentBrowser)
     @lens.each do |agent|
       next unless agent.is_a?(Agent)
 
-      if pred = agent.pred?(in: viewer)
+      if pred = agent.pred?(in: browser)
         inspect pred
       end
 
@@ -103,11 +32,11 @@ class Protoplasm < Tank
     end
   end
 
-  def inspect_next_agent(*, in viewer : AgentViewer)
+  def inspect_next_agent(*, in browser : AgentBrowser)
     @lens.each do |agent|
       next unless agent.is_a?(Agent)
 
-      if succ = agent.succ?(in: viewer)
+      if succ = agent.succ?(in: browser)
         inspect(succ)
       end
 
@@ -160,91 +89,183 @@ abstract class Agent < CircularEntity
   include IHaloSupport
 
   @editor : Editor
-  private getter! errors : ErrorMessageViewer # fix this somehow
 
   def initialize(tank : Tank)
     super(tank, self.class.color, lifespan: nil)
 
     @editor = to_editor
-    @dragged = false
-
-    @errors = ErrorMessageViewer.new(self)
-  end
-
-  protected abstract def to_editor : Editor
-
-  def pred?(*, in viewer : AgentViewer)
-  end
-
-  def succ?(*, in viewer : AgentViewer)
-  end
-
-  def register(viewer : AgentViewer)
-    viewer.register(@editor)
-  end
-
-  def unregister(viewer : AgentViewer)
-    viewer.unregister(@editor)
-  end
-
-  def title? : String?
-    nil
-  end
-
-  def into(view : SF::View) : SF::View
-    view
   end
 
   def self.radius
     16
   end
 
-  def icon_font_size
-    14
-  end
-
+  # Specifies the color with which this kind of agent should be painted.
   def self.color
     SF::Color.new(0x42, 0x42, 0x42)
+  end
+
+  # Summons a copy of this agent in the given *browser*.
+  abstract def copy(*, in browser : AgentBrowser)
+
+  @errors = ErrorMessageViewer.new
+
+  # Returns whether this agent has failed, that is, whether there
+  # are any errors associated with this agent.
+  def failed?
+    @errors.any?
+  end
+
+  # Tells the error message browser of this cell to show the previous
+  # error message, if any.
+  def to_prev_error
+    @errors.to_prev
+  end
+
+  # Tells the error message browser of this cell to show the next
+  # error message, if any.
+  def to_next_error
+    @errors.to_next
+  end
+
+  # Handles failure of this cell with the given error *message*:
+  # tells the error message browser to display an error with the
+  # given *message*.
+  def fail(message : String)
+    @errors.insert(ErrorMessage.new(message))
+
+    halo = Halo.new(self, SF::Color.new(0xE5, 0x73, 0x73, 0x33), overlay: false)
+    halo.summon
+  end
+
+  # Clears all error messages on this cell. Removes the error halo.
+  def unfail
+    @errors.clear
+    @halos.each &.dismiss
+  end
+
+  getter? paused = false
+
+  # Pauses this agent. This means that this agent won't express its
+  # rule until it is `unpause`d.
+  def pause
+    @paused = true
+  end
+
+  # Unpauses this agent. This agent will start to express its rule
+  # as usual.
+  def unpause
+    @paused = false
+  end
+
+  # Toggles between `pause` and `unpause`.
+  def toggle
+    @paused ? unpause : pause
+  end
+
+  # Returns the title of this agent, or nil.
+  #
+  # The title will be displayed as a hint to the right of this agent.
+  # It can be used to e.g. indicate the name of the rule expressed by
+  # this agent etc.
+  def title? : String?
+  end
+
+  # Registers this agent in the given *browser*.
+  def register(*, in browser : AgentBrowser)
+    browser.submit(@editor)
+  end
+
+  # Unregisters this agent in the given *browser*.
+  def unregister(*, in browser : AgentBrowser)
+    browser.withdraw(@editor)
+  end
+
+  # Builds and returns a `CP::Constraint::DampedString` between this and
+  # *other* agents configured according to the arguments.
+  def spring(*, to other : Agent, **kwargs)
+    other.spring(@body, **kwargs)
+  end
+
+  # Builds and returns a `CP::Constraint::DampedString` between this agent's
+  # body and the given *body* configured according to the arguments.
+  def spring(body : CP::Body, length : Number, stiffness : Number, damping : Number)
+    CP::Constraint::DampedSpring.new(@body, body, CP.v(0, 0), CP.v(0, 0), length, stiffness, damping)
+  end
+
+  # Builds and returns a `CP::Constraint::SlideJoint` between this and
+  # *other* agents configured according to the arguments.
+  def slide_joint(*, with other : Agent, **kwargs)
+    other.slide_joint(@body, **kwargs)
+  end
+
+  # Builds and returns a `CP::Constraint::SlideJoint` between this agent's
+  # body and the given *body* configured according to the arguments.
+  def slide_joint(body : CP::Body, min : Number, max : Number)
+    CP::Constraint::SlideJoint.new(@body, body, CP.v(0, 0), CP.v(0, 0), min, max)
+  end
+
+  # Opens the editor for this agent in the given agent *browser* unless
+  # it is already open.
+  def edit(*, in browser : AgentBrowser)
+    return if browser.editor_open?(@editor)
+
+    browser.open(self, @editor)
+  end
+
+  # Creates an edge between this and *other* agent in *browser*.
+  #
+  # Defined as a noop. Subclasses decide for themselves on how (and
+  # with whom) they are going to handle connections.
+  #
+  # Assumes this and other are compatible. If you're unsure, you can
+  # check for whether this is the case using `compatible?`.
+  def connect(*, to other : Agent, in browser : AgentBrowser)
+  end
+
+  # Returns whether this and *other* agents are compatible (and therefore
+  # connectible, see `connect`) with each other in the given *browser*.
+  def compatible?(other : Agent, in browser : AgentBrowser)
+    false
+  end
+
+  # Fills the editor of this agent with the captured content of the
+  # *other* editor.
+  def drain(other : Editor)
+  end
+
+  # :nodoc:
+  macro def_drain_as(type, itype)
+    # Fills the editor of this agent with the captured content of
+    # the given `{{type}}`.
+    def drain(editor : {{type}})
+      @editor.as({{type}}).drain(editor)
+    end
+
+    def drain(instant : {{itype}})
+      @editor.as({{type}}).drain(instant)
+    end
+  end
+
+  def into(view : SF::View) : SF::View
+    view
+  end
+
+  def icon_font_size
+    14
   end
 
   def outline_color
     if @tank.inspecting?(self)
       SF::Color.new(0x58, 0x65, 0x96)
     else
-      _, c, h = LCH.rgb2lch(icon_color.r, icon_color.g, icon_color.b)
+      _, _, h = LCH.rgb2lch(icon_color.r, icon_color.g, icon_color.b)
 
       SF::Color.new(*LCH.lch2rgb(40, 10, h))
     end
   end
 
-  @paused = false
-
-  def play
-    @paused = false
-  end
-
-  def pause
-    @paused = true
-  end
-
-  def failed?
-    errors.any?
-  end
-
-  def to_next_error
-    errors.to_next
-  end
-
-  def to_prev_error
-    errors.to_prev
-  end
-
-  def fail(message : String)
-    errors.insert(ErrorMessage.new(message))
-
-    halo = Halo.new(self, SF::Color.new(0xE5, 0x73, 0x73, 0x33), overlay: false)
-    halo.summon
-  end
+  @dragged = false
 
   def lift(mouse : Vector2)
     @dragged = true
@@ -260,40 +281,11 @@ abstract class Agent < CircularEntity
     @dragged = false
   end
 
-  def open(*, in viewer : AgentViewer)
-    return if viewer.editor_open?(@editor)
-
-    viewer.open(self, @editor)
-  end
-
-  def compatible?(other : Agent, in viewer : AgentViewer)
-    false
-  end
-
   def halo(color : SF::Color) : SF::Drawable
     circle = SF::CircleShape.new(radius: self.class.radius * 1.3)
     circle.position = (mid - self.class.radius.xy*1.3).sf
     circle.fill_color = color
     circle
-  end
-
-  def connect(*, to other : Agent, in viewer : AgentViewer)
-  end
-
-  def spring(*, to other : Agent, **kwargs)
-    other.spring(@body, **kwargs)
-  end
-
-  def slide_joint(*, with other : Agent, **kwargs)
-    other.slide_joint(@body, **kwargs)
-  end
-
-  def spring(body : CP::Body, length : Number, stiffness : Number, damping : Number)
-    CP::Constraint::DampedSpring.new(@body, body, CP.v(0, 0), CP.v(0, 0), length, stiffness, damping)
-  end
-
-  def slide_joint(body : CP::Body, min : Number, max : Number)
-    CP::Constraint::SlideJoint.new(@body, body, CP.v(0, 0), CP.v(0, 0), min, max)
   end
 
   def draw(target : SF::RenderTarget, states : SF::RenderStates)
@@ -347,46 +339,43 @@ abstract class Agent < CircularEntity
       target.draw(dark_overlay)
     end
 
-    target.draw(errors)
+    @errors.paint(on: target, for: self)
   end
-
-  # Fills the editor of this agent with the captured content of the
-  # *other* editor.
-  def drain(other : Editor)
-  end
-
-  # Defines the drain method for the given editor *type* stored in
-  # `@editor` at runtime.
-  macro def_drain_as(type)
-    # Fills the editor of this agent with the captured content of
-    # the given `{{type}}`.
-    def drain(editor : {{type}})
-      @editor.as({{type}}).drain(editor)
-    end
-  end
-
-  abstract def replicate(*, in viewer : AgentViewer)
 end
 
 class ProtocolAgent < Agent
-  def_drain_as ProtocolEditor
+  def_drain_as ProtocolEditor, ProtocolEditorInstant
 
-  def replicate(*, in viewer : AgentViewer)
-    protocol = viewer.summon(ProtocolAgent, at: mid)
+  def copy(*, in browser : AgentBrowser)
+    protocol = browser.summon(ProtocolAgent, at: mid)
     protocol.drain(@editor)
 
-    viewer.each_rule(of: self) do |rule|
-      rule.replicate(under: protocol, in: viewer)
-    end
+    browser.each_rule_agent(of: self, &.copy(under: protocol, in: browser))
 
     protocol
+  end
+
+  def copy(protoplasm : Protoplasm)
+    copy = ProtocolAgent.new(protoplasm)
+    copy.mid = mid
+    copy.drain(@editor)
+    copy.summon
+    copy
+  end
+
+  def rename(name : String)
+    @editor.as(ProtocolEditor).rename(name)
   end
 
   def title?
     @editor.title? || "Untitled"
   end
 
-  def succ?(*, in viewer : AgentViewer)
+  def name?
+    @editor.title?
+  end
+
+  def succ?(*, in browser : AgentBrowser)
     candidate = nil
     distance = nil
 
@@ -400,7 +389,7 @@ class ProtocolAgent < Agent
     candidate
   end
 
-  def pred?(*, in viewer : AgentViewer)
+  def pred?(*, in browser : AgentBrowser)
     candidate = nil
     distance = nil
 
@@ -414,10 +403,10 @@ class ProtocolAgent < Agent
     candidate
   end
 
-  def pred?(of agent : RuleAgent, in viewer : AgentViewer)
+  def pred?(of agent : RuleAgent, in browser : AgentBrowser)
     distance = nil
     candidate = nil
-    viewer.each_rule(of: self) do |rule|
+    browser.each_rule_agent(of: self) do |rule|
       next unless rule.mid.x < agent.mid.x || ((rule.mid.x - agent.mid.x).abs < 8 && rule.mid.y < agent.mid.y)
       if distance.nil? || (rule.mid - agent.mid).magn < distance
         candidate = rule
@@ -426,10 +415,10 @@ class ProtocolAgent < Agent
     candidate
   end
 
-  def succ?(of agent : RuleAgent, in viewer : AgentViewer)
+  def succ?(of agent : RuleAgent, in browser : AgentBrowser)
     distance = nil
     candidate = nil
-    viewer.each_rule(of: self) do |rule|
+    browser.each_rule_agent(of: self) do |rule|
       next unless rule.mid.x > agent.mid.x || ((rule.mid.x - agent.mid.x).abs < 8 && rule.mid.y > agent.mid.y)
       return rule
     end
@@ -448,34 +437,43 @@ class ProtocolAgent < Agent
     SF::Color::White
   end
 
-  def compatible?(other : RuleAgent, in viewer : AgentViewer)
-    !viewer.connected?(self, other)
+  def connect(*, to other : RuleAgent, in browser : AgentBrowser)
+    browser.connect(self, other)
   end
 
-  def connect(*, to other : RuleAgent, in viewer : AgentViewer)
-    viewer.connect(self, other)
+  def compatible?(other : RuleAgent, in browser : AgentBrowser)
+    !browser.connected?(self, other)
   end
 end
 
 abstract class RuleAgent < Agent
-  def replicate(*, in viewer : AgentViewer)
-    copy = viewer.summon(self.class, at: mid)
+  def copy(*, in browser : AgentBrowser)
+    copy = browser.summon(self.class, at: mid)
     copy.drain(@editor)
     copy
   end
 
-  def replicate(*, under protocol : ProtocolAgent, in viewer : AgentViewer)
-    copy = replicate(in: viewer)
-    copy.connect(to: protocol, in: viewer)
+  def copy(*, under protocol : ProtocolAgent, in browser : AgentBrowser)
+    copy = copy(in: browser)
+    copy.mid = protocol.mid
+    copy.connect(to: protocol, in: browser)
     copy
   end
 
-  def succ?(*, in viewer : AgentViewer)
+  def copy(protoplasm : Protoplasm)
+    copy = self.class.new(protoplasm)
+    copy.mid = mid
+    copy.drain(@editor)
+    copy.summon
+    copy
+  end
+
+  def succ?(*, in browser : AgentBrowser)
     candidate = nil
     distance = nil
 
-    viewer.each_protocol(of: self) do |protocol|
-      next unless succ = protocol.succ?(of: self, in: viewer)
+    browser.each_protocol_agent(of: self) do |protocol|
+      next unless succ = protocol.succ?(of: self, in: browser)
 
       if distance.nil? || (succ.mid - mid).magn < distance
         candidate = succ
@@ -485,12 +483,12 @@ abstract class RuleAgent < Agent
     candidate
   end
 
-  def pred?(*, in viewer : AgentViewer)
+  def pred?(*, in browser : AgentBrowser)
     candidate = nil
     distance = nil
 
-    viewer.each_protocol(of: self) do |protocol|
-      next unless pred = protocol.pred?(of: self, in: viewer)
+    browser.each_protocol_agent(of: self) do |protocol|
+      next unless pred = protocol.pred?(of: self, in: browser)
 
       if distance.nil? || (pred.mid - mid).magn < distance
         candidate = pred
@@ -500,22 +498,53 @@ abstract class RuleAgent < Agent
     candidate
   end
 
-  def compatible?(other : ProtocolAgent, in viewer : AgentViewer)
-    other.compatible?(self, in: viewer)
+  def connect(*, to other : ProtocolAgent, in browser : AgentBrowser)
+    browser.connect(other, self)
   end
 
-  def connect(*, to other : ProtocolAgent, in viewer : AgentViewer)
-    viewer.connect(other, self)
+  def compatible?(other : ProtocolAgent, in browser : AgentBrowser)
+    other.compatible?(self, in: browser)
+  end
+
+  def matches?(other : Rule)
+    rule.matches?(other)
   end
 end
 
 class HeartbeatRuleAgent < RuleAgent
-  delegate :title?, to: @editor
+  delegate :title?, :period=, :code=, to: @editor.as(HeartbeatRuleEditor)
 
-  def_drain_as HeartbeatRuleEditor
+  def_drain_as HeartbeatRuleEditor, BufferEditorColumnInstant
+
+  def initialize(tank : Tank)
+    super
+
+    @start = Time.monotonic
+    @pausestart = Time.monotonic
+  end
 
   protected def to_editor : RuleEditor
     HeartbeatRuleEditor.new(HeartbeatRuleEditorState.new, HeartbeatRuleEditorView.new)
+  end
+
+  def rule
+    @editor.as(HeartbeatRuleEditor).to_rule # TODO: regenerate oncontentchanged
+  end
+
+  def period?
+    rule.@signature.as(HeartbeatRuleSignature).period?
+  end
+
+  def pause
+    super
+
+    @pausestart = Time.monotonic
+  end
+
+  def unpause
+    super
+
+    @start += Time.monotonic - @pausestart
   end
 
   def icon
@@ -525,16 +554,34 @@ class HeartbeatRuleAgent < RuleAgent
   def icon_color
     SF::Color.new(0xEF, 0x9A, 0x9A)
   end
+
+  def express(receiver : CellAvatar)
+    return if @paused
+
+    if period = period?
+      time = Time.monotonic
+      elapsed = time - @start
+      return if elapsed < period
+
+      @start = time
+    end
+
+    rule.express(self, receiver: receiver)
+  end
 end
 
 class BirthRuleAgent < RuleAgent
-  delegate :title?, to: @editor
+  delegate :title?, to: @editor.as(BirthRuleEditor)
 
   protected def to_editor : RuleEditor
     BirthRuleEditor.new(BirthRuleEditorState.new, BirthRuleEditorView.new)
   end
 
-  def_drain_as BirthRuleEditor
+  def rule
+    @editor.as(BirthRuleEditor).to_rule # TODO: regenerate oncontentchanged
+  end
+
+  def_drain_as BirthRuleEditor, BufferEditorColumnInstant
 
   def icon
     Icon::BirthRule
@@ -543,16 +590,24 @@ class BirthRuleAgent < RuleAgent
   def icon_color
     SF::Color.new(0xFF, 0xE0, 0x82)
   end
+
+  def express(receiver : CellAvatar)
+    rule.express(self, receiver)
+  end
 end
 
 class KeywordRuleAgent < RuleAgent
-  delegate :title?, to: @editor
+  include RuleExpressibleFromVesicle
 
   protected def to_editor : RuleEditor
     KeywordRuleEditor.new(KeywordRuleEditorState.new, KeywordRuleEditorView.new)
   end
 
-  def_drain_as KeywordRuleEditor
+  def rule
+    @editor.as(KeywordRuleEditor).to_rule # TODO: regenerate oncontentchanged
+  end
+
+  def_drain_as KeywordRuleEditor, BufferEditorColumnInstant
 
   def icon
     Icon::KeywordRule
@@ -560,6 +615,14 @@ class KeywordRuleAgent < RuleAgent
 
   def icon_color
     SF::Color.new(0x90, 0xCA, 0xF9)
+  end
+
+  def matches?(vesicle : Vesicle) : Bool
+    rule.matches?(vesicle)
+  end
+
+  def express(receiver : CellAvatar, vesicle : Vesicle)
+    rule.express(self, receiver, vesicle)
   end
 end
 
@@ -608,27 +671,31 @@ class EndHandlingEvent < Exception
   end
 end
 
-class EventHandlerStore
+class EventAuthorityRegistry
   def initialize
-    @registered = [] of EventHandler
+    @registered = [] of EventAuthority
   end
 
-  def register(handler : EventHandler)
-    if handler.major?
+  def register(authority : EventAuthority)
+    if authority.major?
       # Put major handlers in front. Major handlers usually throw
       # the EndHandling exception to signal that event handling
       # should stop.
-      @registered.unshift(handler)
+      @registered.unshift(authority)
     else
-      @registered.push(handler)
+      @registered.push(authority)
     end
   end
 
-  def unregister(handler : EventHandler)
-    @registered.delete(handler)
+  def unregister(authority : EventAuthority)
+    @registered.delete(authority)
   end
 
-  def handle(event : SF::Event)
+  def clear
+    @registered.clear
+  end
+
+  def dispatch(event : SF::Event)
     active = @registered.dup
     active.each &.handle(event)
   rescue e : EndHandlingEvent
@@ -636,8 +703,8 @@ class EventHandlerStore
   end
 end
 
-abstract class EventHandler
-  def initialize(@handlers : EventHandlerStore)
+abstract class EventAuthority
+  def initialize(@registry : EventAuthorityRegistry)
   end
 
   def major?
@@ -648,11 +715,11 @@ abstract class EventHandler
   end
 end
 
-class DragHandler < EventHandler
+class DragHandler < EventAuthority
   @grip : Vector2
 
-  def initialize(handlers : EventHandlerStore, @item : IDraggable, grip : Vector2, @oneshot = false)
-    super(handlers)
+  def initialize(registry : EventAuthorityRegistry, @item : IDraggable, grip : Vector2, @oneshot = false)
+    super(registry)
 
     @grip = map(grip)
     @item.lift(@grip)
@@ -665,7 +732,7 @@ class DragHandler < EventHandler
   # Sends `drop` message to the item.
   def handle(event : SF::Event::MouseButtonReleased)
     @item.drop map(event.x.at(event.y))
-    @handlers.unregister(self) if @oneshot # oneshot is evhcollection responsibility!
+    @registry.unregister(self) if @oneshot # oneshot is evhcollection responsibility!
   end
 
   # Sends `drag` message to the item if the item is being dragged.
@@ -680,24 +747,24 @@ class DragHandler < EventHandler
 end
 
 class AgentDragHandler < DragHandler
-  def initialize(@viewer : AgentViewer, *args, **kwargs)
+  def initialize(@browser : AgentBrowser, *args, **kwargs)
     super(*args, **kwargs)
   end
 
   def map(pixel : Vector2)
-    @viewer.pixel_to_protoplasm(pixel)
+    @browser.pixel_to_protoplasm(pixel)
   end
 end
 
-class AgentSummoner < EventHandler
+class AgentSummoner < EventAuthority
   @agent : Agent
 
-  def initialize(handlers : EventHandlerStore, @viewer : AgentViewer, agent : Agent.class, pixel : Vector2)
-    super(handlers)
+  def initialize(registry : EventAuthorityRegistry, @browser : AgentBrowser, agent : Agent.class, pixel : Vector2)
+    super(registry)
 
-    @agent = @viewer.summon(agent, at: pixel)
+    @agent = @browser.summon(agent, at: pixel)
     @agent.lift(pixel)
-    @viewer.inspect(@agent)
+    @browser.inspect(@agent)
   end
 
   def major?
@@ -706,13 +773,13 @@ class AgentSummoner < EventHandler
 
   def place
     @agent.drop(@agent.mid)
-    @handlers.unregister(self)
+    @registry.unregister(self)
   end
 
   def cancel
     @agent.drop(@agent.mid)
-    @viewer.dismiss(@agent)
-    @handlers.unregister(self)
+    @browser.dismiss(@agent)
+    @registry.unregister(self)
   end
 
   def handle(event : SF::Event::MouseButtonPressed)
@@ -720,7 +787,7 @@ class AgentSummoner < EventHandler
   end
 
   def handle(event : SF::Event::MouseMoved)
-    coords = @viewer.pixel_to_protoplasm(event.x.at(event.y))
+    coords = @browser.pixel_to_protoplasm(event.x.at(event.y))
 
     @agent.drag(@agent.mid - coords, coords)
   end
@@ -735,21 +802,21 @@ class AgentSummoner < EventHandler
   def handle(event : SF::Event::TextEntered)
     place
 
-    @viewer.inspect(@agent)
+    @browser.inspect(@agent)
   end
 end
 
-class AgentDismisser < EventHandler
-  def initialize(handlers : EventHandlerStore, @viewer : AgentViewer)
-    super(handlers)
+class AgentDismisser < EventAuthority
+  def initialize(registry : EventAuthorityRegistry, @browser : AgentBrowser)
+    super(registry)
 
     @cursor = SF::Cursor.from_system(SF::Cursor::Type::Cross)
-    @viewer.push_cursor(@cursor)
+    @browser.push_cursor(@cursor)
   end
 
   def dismiss
-    @viewer.pop_cursor(@cursor)
-    @handlers.unregister(self)
+    @browser.pop_cursor(@cursor)
+    @registry.unregister(self)
   end
 
   def major?
@@ -764,8 +831,8 @@ class AgentDismisser < EventHandler
 
     coords = event.x.at(event.y)
 
-    if agent = @viewer.find_at_pixel?(coords, entity: Agent)
-      @viewer.dismiss(agent)
+    if agent = @browser.find_at_pixel?(coords, entity: Agent)
+      @browser.dismiss(agent)
     end
 
     dismiss
@@ -787,9 +854,9 @@ class AgentDismisser < EventHandler
   end
 end
 
-class SummonMenuDispatcher < EventHandler
-  def initialize(handlers : EventHandlerStore, @viewer : AgentViewer, pixel : Vector2, @parent : ProtocolAgent? = nil)
-    super(handlers)
+class SummonMenuDispatcher < EventAuthority
+  def initialize(registry : EventAuthorityRegistry, @browser : AgentBrowser, pixel : Vector2, @parent : ProtocolAgent? = nil)
+    super(registry)
 
     #
     # Create a menu object that will be used to display summon options.
@@ -803,9 +870,9 @@ class SummonMenuDispatcher < EventHandler
     fill(@menu)
 
     #
-    # Insert it into the viewer so that the viewer can draw it.
+    # Submit it to the browser so that the browser can draw it.
     #
-    @viewer.register(@menu)
+    @browser.submit(@menu)
 
     #
     # Open the menu.
@@ -832,16 +899,16 @@ class SummonMenuDispatcher < EventHandler
 
   def summon(cls : RuleAgent.class, at pixel : Vector2)
     if protocol = @parent.as?(ProtocolAgent)
-      agent = @viewer.summon(cls, at: pixel)
-      @viewer.inspect(agent)
-      protocol.connect(to: agent, in: @viewer)
+      agent = @browser.summon(cls, at: pixel)
+      @browser.inspect(agent)
+      protocol.connect(to: agent, in: @browser)
     else
-      @handlers.register AgentSummoner.new(@handlers, @viewer, agent: cls, pixel: pixel)
+      @registry.register AgentSummoner.new(@registry, @browser, agent: cls, pixel: pixel)
     end
   end
 
   def summon(cls : Agent.class, at pixel : Vector2)
-    @handlers.register AgentSummoner.new(@handlers, @viewer, agent: cls, pixel: pixel)
+    @registry.register AgentSummoner.new(@registry, @browser, agent: cls, pixel: pixel)
   end
 
   # Accepts the given menu *option*: registers the appropriate
@@ -854,7 +921,7 @@ class SummonMenuDispatcher < EventHandler
       "New protocol":       ProtocolAgent,
     }[option]
 
-    summon(cls, at: @viewer.mouse)
+    summon(cls, at: @browser.mouse)
 
     cancel
   end
@@ -862,7 +929,7 @@ class SummonMenuDispatcher < EventHandler
   # Closes the menu and unregisters self.
   def cancel
     @menu.close
-    @handlers.unregister(self)
+    @registry.unregister(self)
   end
 
   # Forwards the given *event* to the menu.
@@ -893,9 +960,9 @@ class SummonMenuDispatcher < EventHandler
   end
 end
 
-class AgentViewerDispatcher < EventHandler
-  def initialize(handlers : EventHandlerStore, @viewer : AgentViewer)
-    super(handlers)
+class AgentBrowserDispatcher < EventAuthority
+  def initialize(registry : EventAuthorityRegistry, @browser : AgentBrowser)
+    super(registry)
   end
 
   def handle(event : SF::Event::MouseButtonPressed)
@@ -903,41 +970,44 @@ class AgentViewerDispatcher < EventHandler
 
     coords = Vector2.new(event.x, event.y)
 
-    @viewer.editor_at_pixel?(coords) do |editor|
+    @browser.editor_at_pixel?(coords) do |editor|
       editor.focus
       # TODO: make editors IDraggable instead of having another Draggable module
       editor.handle(event)
       return
     end
 
-    protoplasm = @viewer.protoplasm_at_pixel?(coords)
+    protoplasm = @browser.protoplasm_at_pixel?(coords)
 
-    unless protoplasm && @viewer.editor_open?
-      @viewer.editor &.blur
+    unless protoplasm && @browser.editor_open?
+      @browser.editor &.blur
     end
 
     # Open menu at the right-hand side.
     if protoplasm && event.button.right?
-      @handlers.register(SummonMenuDispatcher.new(@handlers, @viewer, pixel: coords))
+      @registry.register(SummonMenuDispatcher.new(@registry, @browser, pixel: coords))
       return
     end
 
-    if agent = @viewer.find_at_pixel?(coords, entity: Agent)
-      if @ctrl
-        agent = agent.replicate(in: @viewer)
+    if agent = @browser.find_at_pixel?(coords, entity: Agent)
+      case
+      when @ctrl then agent = agent.copy(in: @browser)
+      when @alt
+        agent.toggle
+        return
       end
 
       # Start inspecting the clicked-on agent, and register
       # a drag handler for it.
-      @viewer.inspect(agent)
+      @browser.inspect(agent)
 
       if @shift
-        cont = SingleEdgeBuilder.new(@handlers, @viewer, agent)
+        cont = SingleEdgeBuilder.new(@registry, @browser, agent)
       else
-        cont = AgentDragHandler.new(@viewer, @handlers, agent, coords, oneshot: true)
+        cont = AgentDragHandler.new(@browser, @registry, agent, coords, oneshot: true)
       end
 
-      @handlers.register(cont)
+      @registry.register(cont)
 
       return
     end
@@ -945,38 +1015,43 @@ class AgentViewerDispatcher < EventHandler
     # If no agent to drag, register a handler to pan the protoplasm/editor.
     # Stop inspecting if we were, and the click was in the protoplasm.
     if protoplasm
-      @viewer.inspect(nil)
+      @browser.inspect(nil)
     end
 
-    @handlers.register DragHandler.new(@handlers, @viewer, coords, oneshot: true)
+    @registry.register DragHandler.new(@registry, @browser, coords, oneshot: true)
   end
 
   def forward(event : SF::Event)
-    return unless @viewer.editor_open?
+    return unless @browser.editor_open?
 
-    @viewer.editor &.handle(event)
+    @browser.editor &.handle(event)
   end
 
   @shift = false
   @ctrl = false
+  @alt = false
 
   def handle(event : SF::Event::KeyPressed)
     @shift = event.shift || event.code.l_shift? || event.code.r_shift?
     @ctrl = event.control || event.code.l_control? || event.code.r_control?
+    @alt = event.alt || event.code.l_alt? || event.code.r_alt?
 
     case event.code
     when .escape?
-      if @viewer.editor_open?
-        @viewer.editor &.blur
+      if @browser.editor_open?
+        @browser.editor &.blur
+        return
+      else
+        @browser.close
         return
       end
     when .delete?
-      unless @viewer.editor_open?
-        @handlers.register AgentDismisser.new(@handlers, @viewer)
+      unless @browser.editor_open?
+        @registry.register AgentDismisser.new(@registry, @browser)
       end
     when .tab?
       if @ctrl
-        @shift ? @viewer.to_prev_agent : @viewer.to_next_agent
+        @shift ? @browser.to_prev_agent : @browser.to_next_agent
         return
       end
     end
@@ -987,17 +1062,18 @@ class AgentViewerDispatcher < EventHandler
   def handle(event : SF::Event::KeyReleased)
     @shift = false if event.code.l_shift? || event.code.r_shift?
     @ctrl = false if event.code.l_control? || event.code.r_control?
+    @alt = false if event.code.l_alt? || event.code.r_alt?
 
     forward(event)
   end
 
   def handle(event : SF::Event::MouseWheelScrolled)
     coords = event.x.at(event.y)
-    agent = @viewer.find_at_pixel?(coords, entity: Agent)
+    agent = @browser.find_at_pixel?(coords, entity: Agent)
     if agent && agent.failed?
       event.delta.negative? ? agent.to_next_error : agent.to_prev_error
     else
-      @viewer.drag((@shift ? event.delta.x : event.delta.y) * 10, event.x.at(event.y))
+      @browser.drag((@shift ? event.delta.x : event.delta.y) * 10, event.x.at(event.y))
     end
   end
 
@@ -1006,9 +1082,9 @@ class AgentViewerDispatcher < EventHandler
   end
 end
 
-class EdgeCreator < EventHandler
-  def initialize(handlers : EventHandlerStore, @viewer : AgentViewer)
-    super(handlers)
+class EdgeCreator < EventAuthority
+  def initialize(registry : EventAuthorityRegistry, @browser : AgentBrowser)
+    super(registry)
   end
 
   def handle(event : SF::Event::MouseButtonPressed)
@@ -1017,45 +1093,45 @@ class EdgeCreator < EventHandler
     #
     # Find out the agent on which the user clicked.
     #
-    return unless agent = @viewer.find_at_pixel?(Vector2.new(event.x, event.y), entity: Agent)
+    return unless agent = @browser.find_at_pixel?(Vector2.new(event.x, event.y), entity: Agent)
 
     #
     # If the user indeed clicked on an agent, but nothing (of value)
     # is being inspected, switch to EdgeBuilder.
     #
-    if !@viewer.@protoplasm.@lens.aiming_at?(Agent) || @viewer.@protoplasm.@lens.aiming_at?(agent)
-      @handlers.register MultiEdgeBuilder.new(@handlers, @viewer, agent)
+    if !@browser.@protoplasm.@lens.aiming_at?(Agent) || @browser.@protoplasm.@lens.aiming_at?(agent)
+      @registry.register MultiEdgeBuilder.new(@registry, @browser, agent)
       return
     end
 
     #
     # Otherwise, try to connect to one of the selected agents.
     #
-    @viewer.@protoplasm.@lens.each do |other|
+    @browser.@protoplasm.@lens.each do |other|
       next unless other.is_a?(Agent)
-      next unless agent.compatible?(other, in: @viewer)
+      next unless agent.compatible?(other, in: @browser)
 
-      agent.connect(to: other, in: @viewer)
+      agent.connect(to: other, in: @browser)
     end
   end
 end
 
-abstract class EdgeBuilder < EventHandler
+abstract class EdgeBuilder < EventAuthority
   @edge : AgentPointEdge
 
-  def initialize(handlers : EventHandlerStore, @viewer : AgentViewer, @agent : Agent)
-    super(handlers)
+  def initialize(registry : EventAuthorityRegistry, @browser : AgentBrowser, @agent : Agent)
+    super(registry)
 
-    @edge = @viewer.connect(@agent, @agent.mid)
+    @edge = @browser.connect(@agent, @agent.mid)
     @halos = [] of Halo
 
     #
     # Find agents that self is compatible with, and add a halo to
     # them so that the user can see where they can connect.
     #
-    @viewer.each_agent do |other|
+    @browser.each_agent do |other|
       next if @agent.same?(other)
-      next unless @agent.compatible?(other, in: @viewer)
+      next unless @agent.compatible?(other, in: @browser)
 
       halo = Halo.new(other, SF::Color.new(0x43, 0x51, 0x80, 0x55), overlay: true)
       halo.summon
@@ -1071,11 +1147,11 @@ abstract class EdgeBuilder < EventHandler
   def cancel
     @edge.dismiss
     @halos.each &.dismiss
-    @handlers.unregister(self)
+    @registry.unregister(self)
   end
 
   def handle(event : SF::Event::MouseMoved)
-    coords = @viewer.pixel_to_protoplasm?(event.x.at(event.y))
+    coords = @browser.pixel_to_protoplasm?(event.x.at(event.y))
 
     return unless coords
 
@@ -1102,7 +1178,7 @@ end
 class SingleEdgeBuilder < EdgeBuilder
   def handle(event : SF::Event::MouseButtonReleased)
     coords = Vector2.new(event.x, event.y)
-    other = @viewer.find_at_pixel?(coords, entity: Agent)
+    other = @browser.find_at_pixel?(coords, entity: Agent)
 
     # If the user didn't click at an entity (and maybe clicked on void),
     # give them the summon menu.
@@ -1110,14 +1186,14 @@ class SingleEdgeBuilder < EdgeBuilder
       cancel
 
       if protocol = @agent.as?(ProtocolAgent)
-        @handlers.register(SummonMenuDispatcher.new(@handlers, @viewer, coords, parent: protocol))
+        @registry.register(SummonMenuDispatcher.new(@registry, @browser, coords, parent: protocol))
       end
 
       raise EndHandlingEvent.new(event)
     end
 
     # Cancel if over an agent but not compatible.
-    unless @agent.compatible?(other, in: @viewer)
+    unless @agent.compatible?(other, in: @browser)
       cancel
 
       raise EndHandlingEvent.new(event)
@@ -1125,7 +1201,7 @@ class SingleEdgeBuilder < EdgeBuilder
 
     # If the user clicked at a *compatible* agent, make an edge with
     # that agent and cancel.
-    @agent.connect(to: other, in: @viewer)
+    @agent.connect(to: other, in: @browser)
 
     cancel
   end
@@ -1134,7 +1210,7 @@ end
 class MultiEdgeBuilder < EdgeBuilder
   def handle(event : SF::Event::MouseButtonPressed)
     coords = Vector2.new(event.x, event.y)
-    other = @viewer.find_at_pixel?(coords)
+    other = @browser.find_at_pixel?(coords)
 
     # If the user didn't click at an entity (and maybe clicked on void),
     # give them the summon menu.
@@ -1142,7 +1218,7 @@ class MultiEdgeBuilder < EdgeBuilder
       cancel
 
       if protocol = @agent.as?(ProtocolAgent)
-        @handlers.register(SummonMenuDispatcher.new(@handlers, @viewer, coords, parent: protocol))
+        @registry.register(SummonMenuDispatcher.new(@registry, @browser, coords, parent: protocol))
       end
 
       raise EndHandlingEvent.new(event)
@@ -1151,11 +1227,11 @@ class MultiEdgeBuilder < EdgeBuilder
     # If the user clicked at an *incompatible* agent or another entity,
     # don't do anything, and ask the other handlers to skip the event.
     raise EndHandlingEvent.new(event) unless other.is_a?(Agent)
-    raise EndHandlingEvent.new(event) unless @agent.compatible?(other, in: @viewer)
+    raise EndHandlingEvent.new(event) unless @agent.compatible?(other, in: @browser)
 
     # If the user clicked at a *compatible* agent, make an edge with
     # that agent and cancel.
-    @agent.connect(to: other, in: @viewer)
+    @agent.connect(to: other, in: @browser)
 
     # Dismiss halos with the agent we've just connected to.
     @halos.reject! do |halo|
@@ -1182,8 +1258,8 @@ class EditorPanel
 
   @offset : Vector2
 
-  def initialize(@viewer : AgentViewer, @editor : Editor)
-    @offset = Vector2.new(@editor.size/2) + (viewer.size.y / 4).y
+  def initialize(@browser : AgentBrowser, @editor : Editor)
+    @offset = Vector2.new(@editor.size/2) + (browser.size.y / 4).y
   end
 
   def lift(mouse : Vector2)
@@ -1328,7 +1404,7 @@ end
 
 class KeepcloseLink < AgentAgentEdge
   def self.length
-    3 * Agent.radius
+    5 * Agent.radius
   end
 
   def self.stiffness
@@ -1354,7 +1430,7 @@ class KeepawayLink < AgentAgentConstraint
   end
 
   def self.max
-    10 * Agent.radius
+    24 * Agent.radius
   end
 
   def visible?
@@ -1371,7 +1447,7 @@ class ErrorMessage
     @text.size
   end
 
-  def put(*, on target : SF::RenderTarget, at point : Vector2)
+  def paint(*, on target : SF::RenderTarget, at point : Vector2)
     @text.position = point.sfi
     @text.fill_color = SF::Color.new(0xB7, 0x1C, 0x1C)
     target.draw(@text)
@@ -1379,9 +1455,7 @@ class ErrorMessage
 end
 
 class ErrorMessageViewer
-  include SF::Drawable
-
-  def initialize(@agent : Agent)
+  def initialize
     @errors = [] of ErrorMessage
     @current = 0
   end
@@ -1420,22 +1494,29 @@ class ErrorMessageViewer
     @current = @errors.size - 1
   end
 
+  def clear
+    @errors.clear
+    @current = 0
+  end
+
   def padding
     5.at(3)
   end
 
-  def draw(target, states)
-    error = @errors[@current]? || return
+  def paint(*, on target : SF::RenderTarget, for agent : Agent)
+    return unless any?
+
+    error = @errors[@current]
 
     extent = Vector2.new(error.size) + padding*2
-    origin = @agent.mid - extent.y + @agent.class.radius.xy * 1.5.at(-1.5)
+    origin = agent.mid - extent.y + agent.class.radius.xy * 1.5.at(-1.5)
 
     bg = SF::RectangleShape.new
     bg.position = origin.sfi
     bg.size = extent.sfi
     bg.fill_color = SF::Color.new(0xEF, 0x9A, 0x9A, 0xdd)
 
-    src = @agent.mid - @agent.class.radius.y
+    src = agent.mid - agent.class.radius.y
     dst = origin + extent.y.y
     dir = dst - src
 
@@ -1454,7 +1535,7 @@ class ErrorMessageViewer
     target.draw(connector_tip)
 
     target.draw(bg)
-    error.put(on: target, at: origin + padding)
+    error.paint(on: target, at: origin + padding)
 
     return if @errors.size < 2
 
@@ -1480,61 +1561,37 @@ class ErrorMessageViewer
   end
 end
 
-class AgentViewer
+class AgentBrowser
   include IDraggable
 
-  # Returns the size of this viewer in pixels.
+  # Returns the size of this browser in pixels.
   getter size : Vector2
 
-  def initialize(@window : SF::RenderWindow, @mouse : BoxedVector2, @size : Vector2)
+  @protoplasm : Protoplasm
+
+  def initialize(@hub : AgentBrowserHub, @size : Vector2, @protoplasm : Protoplasm, @graph : AgentGraph)
     # Allocate 40% of width to the right-hand side editor panel, and
     # leave the rest to the protoplasm.
     @screen = SF::RenderTexture.new(size.x.to_i, size.y.to_i, SF::ContextSettings.new(depth: 24, antialiasing: 8))
     @canvas = SF::RenderTexture.new((size.x * 0.6).to_i, size.y.to_i, SF::ContextSettings.new(depth: 24, antialiasing: 8))
     @rpanel = SF::RenderTexture.new((size.x * 0.4).to_i, size.y.to_i, SF::ContextSettings.new(depth: 24, antialiasing: 8))
 
-    @protoplasm = Protoplasm.new
-    @graph = AgentGraph.new(@protoplasm)
-
-    kw = KeywordRuleAgent.new(@protoplasm)
-    kw.mid = 400.at(200)
-    kw.register(self)
-    kw.summon
-
-    br = BirthRuleAgent.new(@protoplasm)
-    br.mid = 500.at(200)
-    br.register(self)
-    br.summon
-
-    hb = HeartbeatRuleAgent.new(@protoplasm)
-    hb.mid = 200.at(200)
-    hb.register(self)
-    hb.summon
-
-    pa = ProtocolAgent.new(@protoplasm)
-    pa.mid = 200.at(300)
-    pa.register(self)
-    pa.summon
+    @protoplasm.each_agent do |agent|
+      agent.register(in: self)
+    end
   end
 
-  delegate :connect, :disconnect, :connected?, :each_protocol, :each_rule, to: @graph
+  delegate :connect, :disconnect, :connected?, :each_protocol_agent, :each_rule_agent, to: @graph
+  delegate :mouse, :push_cursor, :pop_cursor, to: @hub
 
-  @cursors = [] of SF::Cursor
-
-  def push_cursor(cursor : SF::Cursor)
-    @cursors << cursor
-    @window.mouse_cursor = cursor
-  end
-
-  def pop_cursor(cursor : SF::Cursor)
-    @cursors.delete_at(@cursors.rindex(cursor) || raise "cursor was not pushed: #{cursor}")
-    @window.mouse_cursor = @cursors.last? || SF::Cursor.from_system(SF::Cursor::Type::Arrow)
+  def close
+    @hub.close
   end
 
   def summon(cls : Agent.class, *, at pixel : Vector2)
     agent = cls.new(@protoplasm)
     agent.mid = pixel_to_protoplasm(pixel)
-    agent.register(self)
+    agent.register(in: self)
     agent.summon
     agent
   end
@@ -1542,7 +1599,7 @@ class AgentViewer
   def dismiss(agent : Agent)
     edit(entity: nil)
 
-    agent.unregister(self)
+    agent.unregister(in: self)
 
     @graph.disconnect(agent)
 
@@ -1561,22 +1618,22 @@ class AgentViewer
   @editor : EditorPanel?
   @menu : Menu?
 
-  def register(editor : Editor)
+  def submit(editor : Editor)
     @states[editor.object_id] = EditorPanel.new(self, editor)
   end
 
-  def register(menu : Menu)
+  def submit(menu : Menu)
     @menu.try &.close
     @menu = menu
   end
 
-  def unregister(editor : Editor)
+  def withdraw(editor : Editor)
     @states.delete(editor.object_id)
   end
 
-  def registered!(editor : Editor)
+  def submitted!(editor : Editor)
     unless @states.has_key?(editor.object_id)
-      raise "AgentViewer: cannot use an unregistered editor"
+      raise "AgentBrowser: cannot use an editor that was not submitted"
     end
   end
 
@@ -1599,7 +1656,7 @@ class AgentViewer
   end
 
   def open(opener : Agent, editor : Editor)
-    registered!(editor)
+    submitted!(editor)
 
     editor do |prev|
       next if prev.same?(editor)
@@ -1617,13 +1674,13 @@ class AgentViewer
   end
 
   def close(editor : Editor)
-    registered!(editor)
+    submitted!(editor)
 
     puts "close #{editor}"
   end
 
   def edit(entity : Agent)
-    entity.open(in: self)
+    entity.edit(in: self)
   end
 
   def edit(entity : Nil)
@@ -1649,10 +1706,6 @@ class AgentViewer
   end
 
   delegate :each_agent, to: @protoplasm
-
-  def mouse
-    @mouse.unbox
-  end
 
   def protoplasm_at_pixel?(pixel : Vector2)
     pixel.x.in?(0...@canvas.size.x) && pixel.y.in?(0...@canvas.size.y)
@@ -1695,9 +1748,13 @@ class AgentViewer
     end
   end
 
-  def register(handlers : EventHandlerStore)
-    handlers.register(AgentViewerDispatcher.new(handlers, self))
-    handlers.register(EdgeCreator.new(handlers, self))
+  def register(registry : EventAuthorityRegistry)
+    registry.register(AgentBrowserDispatcher.new(registry, self))
+    registry.register(EdgeCreator.new(registry, self))
+  end
+
+  def unregister(registry : EventAuthorityRegistry)
+    registry.clear
   end
 
   @draggable : IDraggable?
@@ -1801,38 +1858,156 @@ class AgentViewer
   end
 end
 
-class BoxedVector2
-  def initialize(@vector : Vector2)
+struct MouseManager
+  @cursors = [] of SF::Cursor
+
+  def initialize(@window : SF::RenderWindow)
   end
 
-  def set(@vector)
+  def position
+    Vector2.new @window.map_pixel_to_coords(SF::Mouse.get_position(@window))
   end
 
-  def unbox
-    @vector
+  def push(cursor : SF::Cursor)
+    @cursors << cursor
+    @window.mouse_cursor = cursor
+  end
+
+  def pop(cursor : SF::Cursor)
+    @cursors.delete_at(@cursors.rindex(cursor) || raise "cursor was not pushed: #{cursor}")
+    @window.mouse_cursor = @cursors.last? || SF::Cursor.from_system(SF::Cursor::Type::Arrow)
   end
 end
 
-window = SF::RenderWindow.new(SF::VideoMode.new(800, 600), title: "Hello World", settings: SF::ContextSettings.new(depth: 24, antialiasing: 8))
-window.framerate_limit = 60
+class AgentBrowserHub
+  include SF::Drawable
 
-handlers = EventHandlerStore.new
+  property position : Vector2 = 0.at(0)
+  getter size : Vector2
 
-mouse = BoxedVector2.new(0.at(0))
+  def initialize(@mouse : MouseManager, @size)
+    @registry = EventAuthorityRegistry.new
+    @watch = TimeTable.new(ClockAuthority.new)
+  end
 
-viewer = AgentViewer.new(window, mouse, 700.at(400))
-viewer.register(handlers)
-a = viewer.@protoplasm.@entities.sample(Agent)
-a.pause
-a.fail("This is an example of an error message")
-b = viewer.@protoplasm.@entities.sample(Agent)
-b.pause
-b.fail("This is an example of another error message #1")
-b.fail("This is an example of another error message #2")
-b.fail("This is an example of another error message #3")
-b.fail("This is an example of another error message #4")
-b.fail("This is an example of another error message #5")
-b.fail("This is an example of another error message #6")
+  def close
+    App.the.tank.inspect(nil)
+  end
+
+  def mouse
+    App.the.coords(@mouse.position) - position
+  end
+
+  def push_cursor(cursor : SF::Cursor)
+    @mouse.push(cursor)
+  end
+
+  def pop_cursor(cursor : SF::Cursor)
+    @mouse.pop(cursor)
+  end
+
+  @bmap = {} of Cell => AgentBrowser
+  @browsers = [] of AgentBrowser
+
+  def browser?
+    @browsers.last?
+  end
+
+  def browse(cell : Cell)
+    @browsers.last?.try &.unregister(@registry)
+
+    browser = @bmap[cell]? || raise "BUG: cell must be registered first before use in shared CellBrowser!"
+    browser.register(@registry)
+
+    @browsers << browser
+  end
+
+  def upload(cell : Cell)
+    browser = @browsers.pop
+    browser.inspect(nil)
+    browser.unregister(@registry)
+    @browsers.last?.try &.register(@registry)
+  end
+
+  def register(cell : Cell)
+    @bmap[cell] = cell.browse(self, size)
+  end
+
+  def register(cell : Cell, agent : Agent)
+    agent_browser = @bmap[cell]
+    agent.register(in: agent_browser)
+  end
+
+  def unregister(cell : Cell)
+    @bmap.delete(cell)
+  end
+
+  @clicks = 0
+  @mouseup : SF::Event::MouseButtonReleased?
+  @mousedown : SF::Event::MouseButtonPressed?
+  @mousedown_at : Vector2?
+  @click_timeout : UUID?
+
+  def handle(event : SF::Event::MouseButtonPressed)
+    @clicks += 1
+    @mousedown = event
+
+    @click_timeout ||= @watch.after(150.milliseconds) do
+      @mousedown.try do |event|
+        event.clicks = @clicks
+        @registry.dispatch(event)
+      end
+      @mouseup.try { |event| @registry.dispatch(event) }
+      @clicks = 0
+      @click_timeout = nil
+      @mouseup = nil
+      @mousedown = nil
+    end
+  end
+
+  def handle(event : SF::Event::MouseButtonReleased)
+    if @mousedown
+      @mouseup = event
+      return
+    end
+
+    @registry.dispatch(event)
+  end
+
+  def handle(event : SF::Event::MouseMoved)
+    if (md = @mousedown) && (event.x.at(event.y) - md.x.at(md.y)).magn > 4 # 4px
+      @mousedown.try do |event|
+        event.clicks = @clicks
+        @registry.dispatch(event)
+      end
+      @mouseup.try { |event| @registry.dispatch(event) }
+      @clicks = 0
+      @watch.cancel(@click_timeout.not_nil!)
+      @click_timeout = nil
+      @mouseup = nil
+      @mousedown = nil
+      return
+    end
+
+    @registry.dispatch(event)
+  end
+
+  def handle(event : SF::Event)
+    @registry.dispatch(event)
+  end
+
+  def tick(delta : Float)
+    @watch.tick
+    browser?.try &.tick(1/60)
+  end
+
+  def draw(target : SF::RenderTarget, states : SF::RenderStates)
+    browser?.try &.draw do |sprite|
+      sprite.position = position.sfi
+      sprite.draw(target, states)
+    end
+  end
+end
 
 # TODO:
 #
@@ -1845,103 +2020,24 @@ b.fail("This is an example of another error message #6")
 # [x] implement C-Tab/C-S-Tab
 # [x] implement ctrl-drag to copy rule within protocol and ctrl-drag to
 #     copy entire protocol
-# [ ] bridge with protocols & rules: be able to initialize a agentviewer
+# [x] bridge with protocols & rules: be able to initialize a AgentBrowser
 #     from a protocolcollection & keep it there, agents own rules/protocols?
-# [ ] when agentviewer receives message, it forwards to matching protocol?
-# [ ] when protocol receives message, it forwards to matching agent?
-# [ ] when agent receives message, it executes matching rule?
-# [ ] heartbeatagent triggers its rule on tick?
-# [ ] rename 'agent' to 'actor' everywhere: my typo propagated...?
+# [x] when AgentBrowser receives message, it forwards to matching protocol?
+# [x] when protocol receives message, it forwards to matching agent?
+# [x] when agent receives message, it executes matching rule?
+# [x] heartbeatagent triggers its rule on tick?
 # [ ] refactor into an isolated, connectable component & document
-#   [ ] split agent viewer into... something.. s? it's too big and does
+#   [ ] split agent browser into... something.. s? it's too big and does
 #       too much. also eventhandler and eventhandlerstore are bad names
 #       for what they do / what is done with them -- they have much more
 #       agency than simple event handlers
-# [ ] merge with the main editor
-# [ ] implement play/pause for protocols which is triggered by Protocol#enable/
-#     Protocol#disable/etc. Pausing a protocol pauses all rules
+# [x] merge with the main editor
+# [x] implement play/pause for protocols which is triggered by Protocol#enable/
+#     Protocol#disable/etc.
 # [ ] implement play/pause for protoplasm (that is, for Tank)
 # [ ] use play/pause on tank as an implementation of play/pause instead
 #     of the weird ClockAuthority stuff -- implement TimeTable#pause and
 #     TimeTable#unpause.
 # [ ] add a GUI way to pause/unpause individual cells
-# [ ] add a GUI way to pause/unpause individual rules
-# [ ] add a GUI way to pause/unpause individual protocols
-
-clicks = 0
-mouseup = nil
-mousedown = nil
-mousedown_at = nil
-
-tt = TimeTable.new(ClockAuthority.new)
-
-click_timeout = nil
-
-released_queue = nil
-
-while window.open?
-  while event = window.poll_event
-    case event
-    when SF::Event::Closed then window.close
-    when SF::Event::MouseWheelScrolled
-      mouse.set(event.x.at(event.y))
-    when SF::Event::GainedFocus
-      pos = SF::Mouse.get_position(window)
-      mouse.set(Vector2.new(pos))
-    when SF::Event::MouseButtonPressed
-      mouse.set(event.x.at(event.y))
-
-      clicks += 1
-      mousedown = event
-
-      click_timeout ||= tt.after(150.milliseconds) do
-        mousedown.try do |event|
-          event.clicks = clicks
-          handlers.handle(event)
-        end
-        mouseup.try { |event| handlers.handle(event) }
-        clicks = 0
-        click_timeout = nil
-        mouseup = nil
-        mousedown = nil
-      end
-
-      next
-    when SF::Event::MouseButtonReleased
-      mouse.set(event.x.at(event.y))
-
-      if mousedown
-        mouseup = event
-        next
-      end
-    when SF::Event::MouseMoved
-      mouse.set(event.x.at(event.y))
-
-      if (md = mousedown) && (event.x - md.x)**2 + (event.y - md.y)**2 > 16 # > 4px
-        mousedown.try do |event|
-          event.clicks = clicks
-          handlers.handle(event)
-        end
-        mouseup.try { |event| handlers.handle(event) }
-        clicks = 0
-        tt.cancel(click_timeout.not_nil!)
-        click_timeout = nil
-        mouseup = nil
-        mousedown = nil
-        next
-      end
-    end
-
-    handlers.handle(event)
-  end
-
-  tt.tick
-
-  viewer.tick(1/60)
-
-  window.clear(SF::Color::White)
-  viewer.draw do |sprite|
-    window.draw(sprite)
-  end
-  window.display
-end
+# [x] add a GUI way to pause/unpause individual rules
+# [x] add a GUI way to pause/unpause individual protocols

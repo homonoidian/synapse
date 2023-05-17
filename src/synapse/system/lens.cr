@@ -24,6 +24,10 @@ module Inspectable
   # Invoked when this inspectable is blurred.
   def blur
   end
+
+  # Handles *event* forwarded by the lens when this inspectable is focused.
+  def handle(event : SF::Event)
+  end
 end
 
 # A lens is an object that can aim at `Inspectable`s, negotiate re-aming

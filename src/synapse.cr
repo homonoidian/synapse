@@ -76,7 +76,7 @@ require "./synapse/ui/menu"
 
 require "./synapse/ui/*"
 
-require "./ped2"
+require "./protopl"
 
 FONT        = SF::Font.from_memory({{read_file("./fonts/code/scientifica.otb")}}.to_slice)
 FONT_BOLD   = SF::Font.from_memory({{read_file("./fonts/code/scientificaBold.otb")}}.to_slice)
@@ -143,7 +143,7 @@ class World < Tank
   end
 
   def cell(*, to pos : Vector2)
-    cell = CellAvatar.new(self, cell: Cell.new)
+    cell = CellAvatar.new(self, cell: Cell.new, browser: App.the.browser)
     cell.mid = pos
     cell.summon
     cell
@@ -199,9 +199,6 @@ class World < Tank
     @watch.tick
 
     super
-
-    each_cell &.systole
-    each_cell &.dyastole
   end
 
   JCIRC = SF::CircleShape.new(point_count: 10)
@@ -945,8 +942,9 @@ class App
   class_getter the = App.new
   class_getter time = ClockAuthority.new
 
-  getter tank : Tank
+  getter tank : World
   getter console : Console
+  getter browser : AgentBrowserHub
 
   property? heightmap = false
 
@@ -960,6 +958,8 @@ class App
     @mode.load(self)
   end
 
+  getter mouse
+
   def initialize
     @editor = SF::RenderTexture.new(1280, 720, settings: SF::ContextSettings.new(depth: 24, antialiasing: 8))
     @hud = SF::RenderTexture.new(1280, 720, settings: SF::ContextSettings.new(depth: 24, antialiasing: 8))
@@ -969,6 +969,7 @@ class App
     )
     @editor_window.framerate_limit = 60
     @editor_size = @editor_window.size
+    @mouse = MouseManager.new(@editor_window)
 
     @scene_window = SF::RenderWindow.new(SF::VideoMode.new(640, 480), title: "Synapse — Scene",
       settings: SF::ContextSettings.new(depth: 24, antialiasing: 8)
@@ -978,6 +979,7 @@ class App
 
     @tank = World.new
     @tt = TimeTable.new(App.time)
+    @browser = AgentBrowserHub.new(@mouse, size: 700.at(400))
 
     @console = Console::INSTANCE
     @console.folded = true
@@ -1167,9 +1169,32 @@ class App
           win_view.size = SF.vector2f(event.width, event.height)
           win_view.center = win_view.size/2
           @editor_window.view = win_view
+        when SF::Event::MouseMoved, SF::Event::MouseButtonPressed, SF::Event::MouseButtonReleased, SF::Event::MouseWheelScrolled
+          coords = coords event
+
+          handled = false
+          tank.@lens.each do |object|
+            next unless object.is_a?(CellAvatar) && object.point_in_editor?(coords)
+
+            event.x = coords.x.to_i - object.editor_position.x.to_i
+            event.y = coords.y.to_i - object.editor_position.y.to_i
+            object.handle(event)
+
+            handled = true
+          end
         else
-          self.mode = @mode.map(self, event)
+          handled = false
+          coords = coords @mouse.position
+          tank.@lens.each do |object|
+            next unless object.is_a?(CellAvatar) && object.point_in_editor?(coords)
+
+            object.handle(event)
+
+            handled = true
+          end
         end
+
+        self.mode = @mode.map(self, event) unless handled
       end
 
       while @scene_window.open? && (event = @scene_window.poll_event)
@@ -1189,6 +1214,7 @@ class App
       @tt.tick
 
       @tank.tick(1/60) if @time
+      @browser.tick(1/60)
       @mode.tick(self)
 
       @editor_window.clear(SF::Color.new(0x21, 0x21, 0x21))

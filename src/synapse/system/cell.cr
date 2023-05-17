@@ -1,4 +1,4 @@
-class Cell
+struct Cell
   class Memory
     include LuaCallable
 
@@ -12,22 +12,24 @@ class Cell
 
     def _newindex(key : String, val : Memorable)
       @store[key] = val
-      @cell.on_memory_changed
     end
   end
-
-  # Returns the unique identifier of this cell.
-  getter id : UUID
 
   # Returns the memory of this cell.
   getter memory : Memory
 
-  def initialize(
-    @id = UUID.random,
-    @protocols = ProtocolCollection.new,
+  # Unique identifier of this cell, used in hashing and comparison.
+  @id = UUID.random
+
+  # A set of avatars of this cell.
+  #
+  # Note that avatars are not copies; they are "instances" of
+  # this cell in different tanks.
+  @avatars = Set(CellAvatar).new
+
+  def initialize
+    @graph = AgentGraph.new(Protoplasm.new)
     @relatives = Set(Cell).new
-  )
-    @avatars = Set(CellAvatar).new
 
     @memory = uninitialized Memory
     @memory = Memory.new(self)
@@ -35,15 +37,54 @@ class Cell
     @relatives << self
   end
 
-  # Makes this cell adhere to the given *protocol*.
-  def adhere(protocol : Protocol)
-    @protocols.summon(protocol)
+  protected def initialize(@graph, @relatives)
+    @memory = uninitialized Memory
+    @memory = Memory.new(self)
+
+    @relatives << self
   end
 
-  # Replaces the protocols used by this cell with the given *protocols*.
-  def adhere(protocols : ProtocolCollection)
-    @protocols = protocols
+  def browse(hub : AgentBrowserHub, size : Vector2) : AgentBrowser
+    @graph.browse(hub, size)
   end
+
+  def pack(protocol : ProtocolAgent)
+    ruleset = {} of Rule => BufferEditorColumnInstant
+
+    @graph.each_rule_agent(of: protocol) do |agent|
+      ruleset[agent.rule] = agent.@editor.capture.as(BufferEditorColumnInstant)
+    end
+
+    PackedProtocol.new(protocol.name?.not_nil!, protocol.paused?, ruleset)
+  end
+
+  def adhere(hub : AgentBrowserHub, name : String, paused : Bool, ruleset : Hash(Rule, BufferEditorColumnInstant))
+    protocol = nil
+
+    @graph.each_protocol_agent(named: name) do |existing|
+      protocol = existing
+      break
+    end
+
+    protocol ||= begin
+      it = @graph.naturalize(ProtocolAgent)
+      it.mid = hub.size / 2
+      it.rename(name)
+      yield it
+      it.summon
+      if paused
+        it.pause
+      end
+      it
+    end
+
+    ruleset.each do |rule, instant|
+      @graph.import(protocol, rule, instant) do |agent|
+        yield agent
+      end
+    end
+  end
+
 
   # Yields avatars of this cell.
   def each_avatar(&)
@@ -69,26 +110,33 @@ class Cell
     end
   end
 
-  # Yields each protocol owned by this cell, regardless of whether it
-  # is enabled, disabled, or has a name.
-  def each_protocol(&)
-    @protocols.each_protocol do |protocol|
+  # Yields each protocol owned by this cell wrapped in `OwnedProtocol`,
+  # followed by its name.
+  def each_owned_protocol_with_name(&)
+    @graph.each_protocol_agent do |protocol|
+      next unless name = protocol.name?
+
+      yield OwnedProtocol.new(name, protocol), name
+    end
+  end
+
+  def selective_fill(recipient : AgentGraph, &)
+    @graph.fill(recipient) do |protocol|
       yield protocol
     end
   end
 
-  # Yields each protocol owned by this cell wrapped in `OwnedProtocol`,
-  # followed by its name.
-  def each_owned_protocol_with_name(&)
-    @protocols.each_named_protocol do |protocol, name|
-      yield OwnedProtocol.new(name, protocol), name
-    end
+  def unfail
+    @graph.each_agent &.unfail
   end
 
   # Invoked when an *avatar* of this cell is born.
   def born(avatar : CellAvatar)
     @avatars << avatar
-    @protocols.born(avatar)
+
+    @graph.each_running_birth_agent do |agent|
+      agent.express(receiver: avatar)
+    end
   end
 
   # Invoked when an *avatar* of this cell dies.
@@ -97,45 +145,35 @@ class Cell
 
     return unless @avatars.empty?
 
-    # Remove the last reference to self (presumably), which will make
-    # the GC collect this cell later.
     @relatives.delete(self)
-  end
-
-  # Invoked when the content of this cell's memory changes.
-  def on_memory_changed
-    each_avatar do |avatar|
-      @protocols.on_memory_changed(avatar)
-    end
   end
 
   # Invoked when an *avatar* of this cell receives the given *vesicle*.
   def receive(avatar : CellAvatar, vesicle : Vesicle)
-    @protocols.express(receiver: avatar, vesicle: vesicle)
+    @graph.each_running_rule_agent_matching(vesicle) do |agent|
+      agent.express(receiver: avatar, vesicle: vesicle)
+    end
   end
 
-  # Invoked when *avatar* undergoes systole (see `Protocol#systole`).
-  def systole(avatar : CellAvatar)
-    @protocols.systole(receiver: avatar)
+  # Invoked on every tick of *avatar*. Controls expression of heartbeat
+  # rules for *avatar*.
+  def tick(delta : Float, avatar : CellAvatar)
+    @graph.each_running_heartbeat_agent do |agent|
+      agent.express(receiver: avatar)
+    end
   end
 
-  # Invoked when *avatar* undergoes dyastole (see `Protocol#dyastole`).
-  def dyastole(avatar : CellAvatar)
-    @protocols.dyastole(avatar)
+  # Builds and returns a copy of this cell, possibly one within a
+  # different *graph*.
+  #
+  # This method does not talk to *graph*, but *graph* may wish to
+  # participates in acquisition. Do not use this method if you are
+  # unsure; perhaps look at `AgentGraph#naturalize`.
+  def copy(graph : AgentGraph = @graph)
+    Cell.new(graph, @relatives)
   end
 
-  # Builds and returns a copy of this cell, possibly one using a
-  # different collection of *protocols*.
-  def copy(protocols : ProtocolCollection = @protocols)
-    Cell.new(UUID.random, protocols, @relatives)
-  end
-
-  # Returns a new `CellEditor` for this cell.
-  def to_editor
-    editor = CellEditor.new
-    editor.append(@protocols)
-    editor
-  end
-
+  # When created, each cell is assigned a globally unique identifier.
+  # Hashing and comparison of cells is done using this identifier.
   def_equals_and_hash @id
 end

@@ -45,6 +45,10 @@ class ProtocolEditorState < InputFieldRowState
     @states[0].as(ProtocolNameEditorState).string
   end
 
+  def rename(name : String)
+    @states[0].as(ProtocolNameEditorState).update! { name }
+  end
+
   def capture
     ProtocolEditorInstant.new(super, @id, @enabled)
   end
@@ -218,18 +222,18 @@ class ProtocolEditor < Editor
   include CellEditorEntity
 
   delegate :halo?, :halo=, to: @view
+  delegate :rename, to: @state
 
   def title? : String?
     name = @state.name
     name.empty? ? nil : name
   end
 
-  def append(rule : Rule, to collection : ProtocolCollection)
-    protocol = @state.protocol_from(collection)
-    protocol.append(rule)
+  def capture
+    @state.capture
   end
 
   def drain(source : self)
-    @state.drain(source.@state.capture)
+    @state.drain(source.capture)
   end
 end

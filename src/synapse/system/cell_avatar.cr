@@ -14,7 +14,7 @@ class CellAvatar < CircularEntity
 
   @wires = Set(Wire).new
 
-  def initialize(tank : Tank, @cell : Cell, color : SF::Color, @editor : CellEditor)
+  def initialize(tank : Tank, @cell : Cell, color : SF::Color, @browser : AgentBrowserHub)
     super(tank, color, lifespan: nil)
 
     @drawable = SF::CircleShape.new
@@ -22,22 +22,28 @@ class CellAvatar < CircularEntity
     @drawable.radius = self.class.radius
   end
 
-  def initialize(tank : Tank, cell : Cell)
+  def initialize(tank : Tank, cell : Cell, browser : AgentBrowserHub)
     initialize(tank, cell,
       color: self.class.color,
-      editor: CellEditor.new,
+      browser: browser,
     )
   end
 
-  delegate :memory, :adhere, :each_owned_protocol_with_name, to: @cell
+  delegate :memory, :each_owned_protocol_with_name, :pack, to: @cell
+
+  def adhere(*args, **kwargs)
+    @cell.adhere(@browser, *args, **kwargs) do |agent|
+      @browser.register(@cell, agent)
+    end
+  end
 
   def jangles
     {0, 45, 90, 135, 180, 225, 270, 315}
   end
 
   def point_in_editor?(point : Vector2)
-    origin = (mid + 32.at(32))
-    corner = origin + Vector2.new(@editor.size)
+    origin = Vector2.new(editor_position)
+    corner = origin + @browser.size
     origin.x <= point.x <= corner.x && origin.y <= point.y <= corner.y
   end
 
@@ -103,8 +109,8 @@ class CellAvatar < CircularEntity
     dx = 0
     dy = 0
 
-    origin = @drawable.position - SF.vector2f(CellAvatar.radius, CellAvatar.radius)
-    corner = editor_position + @editor.size + SF.vector2f(CellAvatar.radius, CellAvatar.radius)
+    origin = @drawable.position - CellAvatar.radius.xy.sf
+    corner = editor_position + (@browser.size + CellAvatar.radius.xy).sf
     extent = corner - origin
 
     if view.size.x < extent.x || view.size.y < extent.y
@@ -160,38 +166,36 @@ class CellAvatar < CircularEntity
   def interpret(result : ExpressionResult)
     unless result.is_a?(ErrResult)
       self.sync = true
+      @cell.unfail
       return
     end
 
     fail(result)
   end
 
-  def replicate(to coords = mid) : CellAvatar
-    replica = CellAvatar.new(@tank, @cell.copy, @color, CellEditor.new)
+  def replicate_with_select_protocols(to coords = mid, &)
+    recipient = AgentGraph.new(Protoplasm.new)
+
+    @cell.selective_fill(recipient) do |protocol|
+      !!(yield protocol)
+    end
+
+    replica = CellAvatar.new(@tank, @cell.copy(recipient), @color, @browser)
     replica.mid = coords
     replica.summon
     replica
   end
 
-  def replicate_with_select_protocols(to coords = mid, &)
-    protocols = ProtocolCollection.new
 
-    @cell.each_protocol do |protocol|
-      if yield protocol
-        protocols.summon(protocol)
-      end
-    end
-
-    replica = CellAvatar.new(@tank, @cell.copy(protocols), @color, CellEditor.new)
-    replica.mid = coords
-    replica.summon
-    replica
+  def replicate(to coords = mid) : CellAvatar
+    replicate_with_select_protocols(to: coords) { true }
   end
 
   def summon
     super
 
     @cell.born(avatar: self)
+    @browser.register(@cell)
 
     nil
   end
@@ -200,6 +204,7 @@ class CellAvatar < CircularEntity
     super
 
     @cell.died(avatar: self)
+    @browser.unregister(@cell)
 
     nil
   end
@@ -222,12 +227,11 @@ class CellAvatar < CircularEntity
     # what's being shown.
     self.sync = false
 
-    puts "=== Avatar #{@id} OF Cell #{@cell.id} failed: ===".colorize.bold
-    pp err # FIXME: Uhmmm maybe have a better way to signal error???
+    err.agent.fail(err.error.message || "lua error")
   end
 
   def handle(event)
-    @editor.handle(event)
+    @browser.handle(event)
   end
 
   def editor_position
@@ -235,33 +239,24 @@ class CellAvatar < CircularEntity
   end
 
   def focus
-    @editor = @cell.to_editor
+    @browser.browse(@cell)
   end
 
   def blur
-    @cell.adhere(@editor.to_protocol_collection)
+    @browser.upload(@cell)
 
     # FIXME: hack: Rerun birth rules unconditionally. But this
     # should happen only if they changed!
     @cell.born(avatar: self)
   end
 
-  # Prefer using `Tank` to calling this method yourself because
-  # sync of systoles/dyastoles between relatives is unsupported.
-  def systole
-    @cell.systole(avatar: self)
+  def tick(delta : Float)
+    super
+
+    @cell.tick(delta, avatar: self)
   rescue CommitSuicide
     dismiss
   end
-
-  # :ditto:
-  def dyastole
-    @cell.dyastole(avatar: self)
-  rescue CommitSuicide
-    dismiss
-  end
-
-  @__texture = SF::RenderTexture.new(600, 400)
 
   def draw(target : SF::RenderTarget, states : SF::RenderStates)
     @drawable.position = (mid - CellAvatar.radius).sf
@@ -299,7 +294,7 @@ class CellAvatar < CircularEntity
       bg_rect = SF::RectangleShape.new
       bg_rect.fill_color = sync_color
       bg_rect.position = editor_position - SF.vector2(3, 1)
-      bg_rect.size = @editor.size + SF.vector2f(4, 2)
+      bg_rect.size = @browser.size.sf + SF.vector2f(4, 2)
       target.draw(bg_rect)
 
       #
@@ -311,14 +306,8 @@ class CellAvatar < CircularEntity
       va.append(SF::Vertex.new(bg_rect.position, sync_color_opaque))
       target.draw(va)
 
-      @__texture.clear(SF::Color.new(0x25, 0x25, 0x25))
-      @__texture.draw(@editor)
-      @__texture.display
-
-      sprite = SF::Sprite.new(@__texture.texture)
-      sprite.position = editor_position
-
-      target.draw(sprite)
+      @browser.position = Vector2.new(editor_position)
+      target.draw(@browser)
     end
   end
 end

@@ -50,7 +50,7 @@ class Vein < MorphEntity
 
     # Distribute at each 5th heightpoint.
     0.step(to: self.class.height, by: 10) do |yoffset|
-      @tank.distribute_vein_bi(mid + yoffset.y, message, color, 400.milliseconds, strength: 50.0)
+      @tank.as(World).distribute_vein_bi(mid + yoffset.y, message, color, 400.milliseconds, strength: 50.0)
     end
   end
 

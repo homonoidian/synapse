@@ -200,7 +200,15 @@ class KeywordRuleEditor < RuleEditor
     @state.to_rule
   end
 
+  def capture
+    @state.capture
+  end
+
+  def drain(instant : BufferEditorColumnInstant)
+    @state.drain(instant)
+  end
+
   def drain(source : self)
-    @state.drain(source.@state.capture)
+    drain(source.capture)
   end
 end

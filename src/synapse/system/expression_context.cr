@@ -276,8 +276,8 @@ class ExpressionContext
     # Copy specified protocols, set enabled/disabled based on collection.
     #
     if stack.size == 2 && (enabled = stack[1].as?(Lua::Table)) && (disabled = stack[2].as?(Lua::Table))
-      enabled_set = Set(Protocol).new
-      disabled_set = Set(Protocol).new
+      enabled_set = Set(ProtocolAgent).new
+      disabled_set = Set(ProtocolAgent).new
 
       enabled.each do |_, element|
         element = element.to_crystal if element.is_a?(Lua::Callable)
@@ -301,9 +301,9 @@ class ExpressionContext
 
       @receiver.replicate_with_select_protocols do |protocol|
         if keep = enabled_set.includes?(protocol)
-          protocol.enable
+          protocol.unpause
         elsif keep = disabled_set.includes?(protocol)
-          protocol.disable
+          protocol.pause
         end
 
         keep
@@ -315,7 +315,7 @@ class ExpressionContext
     #
     # Copy specified protocols, carry over whether each is enabled/disabled.
     #
-    protocols = Set(Protocol).new
+    protocols = Set(ProtocolAgent).new
 
     until stack.size == 0
       arg = stack.pop
@@ -363,7 +363,7 @@ class ExpressionContext
       end
 
       if arg.is_a?(OwnedProtocol)
-        arg = arg._pack
+        arg = @receiver.pack(arg._protocol)
       end
 
       args.unshift(arg)
