@@ -352,7 +352,8 @@ class ExpressionContext
     args = Array(Memorable).new(stack.size - 1)
 
     until stack.size == 1
-      arg = stack.pop
+      arg = stack.top
+      stack.remove(1)
 
       if arg.is_a?(Lua::Callable)
         arg = arg.to_crystal
