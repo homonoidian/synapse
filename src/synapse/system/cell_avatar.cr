@@ -100,44 +100,6 @@ class CellAvatar < CircularEntity
     nil
   end
 
-  def into(view : SF::View) : SF::View
-    return view unless inspection_role? is: IRole::Main
-
-    top_left = view.center - SF.vector2f(view.size.x/2, view.size.y/2)
-    bot_right = top_left + view.size
-
-    dx = 0
-    dy = 0
-
-    origin = @drawable.position - CellAvatar.radius.xy.sf
-    corner = editor_position + (@browser.size + CellAvatar.radius.xy).sf
-    extent = corner - origin
-
-    if view.size.x < extent.x || view.size.y < extent.y
-      # Give up: object doesn't fit into the view.
-      return view
-    end
-
-    if origin.x < top_left.x # Cell is to the left of the view
-      dx = origin.x - top_left.x
-    elsif bot_right.x < corner.x # Cell is to the right of the view
-      dx = corner.x - bot_right.x
-    end
-
-    if origin.y < top_left.y # Cell is above the view
-      dy = origin.y - top_left.y
-    elsif bot_right.y < corner.y # Cell is below the view
-      dy = corner.y - bot_right.y
-    end
-
-    return view if dx.zero? && dy.zero?
-
-    new_top_left = SF.vector2f(top_left.x + dx, top_left.y + dy)
-
-    view.center = new_top_left + view.size/2
-    view
-  end
-
   def swim(heading : Float64, speed : Float64)
     @body.velocity = (Math.radians(heading).dir * 1.at(-1) * speed).cp
   end

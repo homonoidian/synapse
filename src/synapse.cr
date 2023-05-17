@@ -375,11 +375,6 @@ class Mode::Normal < Mode
     )
   end
 
-  def tick(app)
-    super
-    app.follow unless @elevated
-  end
-
   def try_inspect(app, cell)
     app.tank.inspect(cell)
   end
@@ -1030,10 +1025,6 @@ class App
     view.center += delta.sf
     view.center = SF.vector2f(view.center.x.round, view.center.y.round)
     @editor.view = view
-  end
-
-  def follow
-    @editor.view = @tank.follow(@editor.view)
   end
 
   ZOOMS = {0.1, 0.3, 0.5, 1.0, 1.3, 1.5, 1.7, 1.9, 2.0}

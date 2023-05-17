@@ -52,13 +52,13 @@ struct Cell
     ruleset = {} of Rule => BufferEditorColumnInstant
 
     @graph.each_rule_agent(of: protocol) do |agent|
-      ruleset[agent.rule] = agent.@editor.capture.as(BufferEditorColumnInstant)
+      agent.pack(into: ruleset)
     end
 
-    PackedProtocol.new(protocol.name?.not_nil!, protocol.paused?, ruleset)
+    PackedProtocol.new(protocol.name?.not_nil!, protocol.enabled?, ruleset)
   end
 
-  def adhere(hub : AgentBrowserHub, name : String, paused : Bool, ruleset : Hash(Rule, BufferEditorColumnInstant), &)
+  def adhere(hub : AgentBrowserHub, name : String, enabled : Bool, ruleset : Hash(Rule, BufferEditorColumnInstant), &)
     protocol = nil
 
     @graph.each_protocol_agent(named: name) do |existing|
@@ -72,8 +72,8 @@ struct Cell
       it.rename(name)
       yield it
       it.summon
-      if paused
-        it.pause
+      unless enabled
+        it.disable
       end
       it
     end

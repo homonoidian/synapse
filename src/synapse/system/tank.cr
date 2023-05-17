@@ -55,10 +55,6 @@ abstract class Tank
     @lens.forward(event)
   end
 
-  def follow(view : SF::View)
-    @lens.configure(view)
-  end
-
   def each_entity(&)
     @entities.each do |entity|
       yield entity

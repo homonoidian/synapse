@@ -209,7 +209,13 @@ class ProtocolEditorView < InputFieldRowView
 end
 
 module ProtocolEditorHandler
-  include Draggable(ProtocolEditorState)
+  include IDraggable
+
+  def dragged(delta : Vector2)
+    @view.position += delta.sfi
+
+    refresh
+  end
 end
 
 # Protocol editor allows to create and edit protocols, which

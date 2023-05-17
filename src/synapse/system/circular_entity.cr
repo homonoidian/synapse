@@ -18,6 +18,12 @@ abstract class CircularEntity < MorphEntity
     4
   end
 
+  # Returns the top left corner of this circular entity as if it
+  # was a square. Bounds are calculated from `width` and `height`.
+  def origin
+    mid - width.at(height)/2
+  end
+
   def width : Number
     self.class.radius*2
   end

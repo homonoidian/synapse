@@ -102,10 +102,10 @@ struct AgentGraph
   # agent that is itself running).
   def each_running_rule_agent(&)
     @graph.each do |protocol, rules|
-      next if protocol.paused?
+      next unless protocol.enabled?
 
       rules.each do |rule|
-        next if rule.paused?
+        next unless rule.enabled?
         yield rule
       end
     end

@@ -1,12 +1,5 @@
 # An object that can be focused by `Lens`.
 module Inspectable
-  # Returns a view (possibly derived from *view* or exactly *view*)
-  # that encloses this inspectable, or includes this inspectable.
-  #
-  # But really, what you do here doesn't matter as long as you return
-  # a view.
-  abstract def into(view : SF::View) : SF::View
-
   # Returns whether this inspectable can be focused.
   def can_be_focused?
     true
@@ -48,12 +41,6 @@ abstract struct Lens
   # Returns whether this lens is aimed at the given *object*.
   def aiming_at?(object)
     false
-  end
-
-  # Configures and returns the given *view*, making sure that whatever
-  # this lens is aimed at fits or is at least included in it.
-  def configure(view : SF::View) : SF::View
-    view
   end
 
   # Forwards the given *event* to whatever this lens is aimed at.
@@ -113,10 +100,6 @@ struct Lens::Focused < Lens
 
   def aiming_at?(cls : T.class) forall T
     @object.is_a?(T)
-  end
-
-  def configure(view : SF::View) : SF::View
-    @object.into(view)
   end
 
   def forward(event : SF::Event)

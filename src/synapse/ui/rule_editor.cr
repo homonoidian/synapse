@@ -86,14 +86,24 @@ class RuleEditorView < BufferEditorColumnView
 end
 
 module RuleEditorHandler
-  include Draggable(RuleEditorState)
+  include IDraggable
 
-  def lift
+  def lifted
     @view.shadow = true
+
+    refresh
   end
 
-  def drop
+  def dragged(delta : Vector2)
+    @view.position += delta.sfi
+
+    refresh
+  end
+
+  def dropped
     @view.shadow = false
+
+    refresh
   end
 end
 

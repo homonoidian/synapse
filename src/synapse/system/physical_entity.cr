@@ -74,6 +74,10 @@ abstract class PhysicalEntity < Entity
   end
 
   # Holds the position of this entity.
+  #
+  # Note: for `MorphEntity` and subclasses, holds the coordinates of
+  # the center of their shapes. `PhysicalEntity` on its own is more like
+  # a point, not a shape, therefore, we can't say it has a "center".
   def mid
     @body.position.x.round.at(@body.position.y.round)
   end

@@ -301,9 +301,9 @@ class ExpressionContext
 
       @receiver.replicate_with_select_protocols do |protocol|
         if keep = enabled_set.includes?(protocol)
-          protocol.unpause
+          protocol.enable
         elsif keep = disabled_set.includes?(protocol)
-          protocol.pause
+          protocol.disable
         end
 
         keep

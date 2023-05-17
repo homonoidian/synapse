@@ -134,8 +134,8 @@ struct AgentAgentEdge < AgentAgentConstraint
   def constraint : CP::Constraint
     @a.spring to: @b,
       length: 5 * Agent.radius,
-      stiffness: 150,
-      damping: 200
+      stiffness: 300,
+      damping: 150
   end
 end
 

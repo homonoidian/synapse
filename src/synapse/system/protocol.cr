@@ -222,7 +222,7 @@ class OwnedProtocol
   #
   # * `OP.enable` where *OP* is the owned protocol.
   def enable
-    @protocol.unpause
+    @protocol.enable
   end
 
   # Disables this protocol.
@@ -231,7 +231,7 @@ class OwnedProtocol
   #
   # * `OP.disable` where *OP* is the owned protocol.
   def disable
-    @protocol.pause
+    @protocol.disable
   end
 
   # Toggles this protocol on/off.
@@ -265,7 +265,7 @@ end
 class PackedProtocol
   include LuaCallable
 
-  def initialize(@name : String, @paused : Bool, @ruleset : Hash(Rule, BufferEditorColumnInstant))
+  def initialize(@name : String, @enabled : Bool, @ruleset : Hash(Rule, BufferEditorColumnInstant))
   end
 
   # Returns the name of the underlying protocol.
@@ -279,6 +279,6 @@ class PackedProtocol
 
   # Asks *receiver* to adhere to this packed protocol.
   def _adhere(receiver : CellAvatar)
-    receiver.adhere(@name, @paused, @ruleset)
+    receiver.adhere(@name, @enabled, @ruleset)
   end
 end
