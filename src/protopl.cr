@@ -676,7 +676,9 @@ class AgentBrowserDispatcher < EventAuthority
     if agent && agent.failed?
       event.delta.negative? ? agent.to_next_error : agent.to_prev_error
     else
-      @browser.dragged((@shift ? event.delta.x : event.delta.y) * 10)
+      # Add a bit of randomness. Otherwise the user may experience some
+      # visual... weirdness in the editor in particular.
+      @browser.dragged((@shift ? event.delta.x : event.delta.y) * (5..15).sample)
     end
   end
 
@@ -884,6 +886,8 @@ class EditorPanel
   end
 
   def draw(target : SF::RenderTarget, states : SF::RenderStates)
+    # FIXME: view isn't seen anywhere; e.g. editor doesn't know it's
+    # in a view -> drag + scroll doesn't work.
     target.view.center = @offset.sfi
     target.draw(@editor)
   end
@@ -1039,8 +1043,21 @@ class AgentBrowser
     @dotted_texture = SF::Texture.from_image(dotted_image)
     @dotted_texture.repeated = true
 
+    @rpanel_inout_progress = 0.0
+    @animator_inout = Animator.new(200.milliseconds) do |progress|
+      @rpanel_inout_progress = ease_in_out_expo(1 - progress)
+    end
+
     @protoplasm.each_agent do |agent|
       agent.register(in: self)
+    end
+  end
+
+  private def ease_in_out_expo(x)
+    if x.in?(0, 1)
+      x
+    else
+      x < 0.5 ? 2 ** (20 * x - 10) / 2 : (2 - 2**(-20 * x + 10)) / 2
     end
   end
 
@@ -1135,6 +1152,7 @@ class AgentBrowser
     editor.focus
 
     @editor = @states[editor.object_id]
+    @animator_inout.animate
   end
 
   def close(editor : Editor)
@@ -1154,6 +1172,7 @@ class AgentBrowser
       close(prev)
 
       @editor = nil
+      @animator_inout.animate
     end
   end
 
@@ -1251,6 +1270,7 @@ class AgentBrowser
   end
 
   def tick(delta : Float)
+    @animator_inout.tick(delta)
     @protoplasm.tick(delta)
   end
 
@@ -1283,9 +1303,9 @@ class AgentBrowser
 
     @canvas.display
     @rpanel.clear(SF::Color.new(0x37, 0x37, 0x37))
+    origin = @rpanel.view.center - @rpanel.size/2
     if @editor
       sprite = SF::Sprite.new(@dotted_texture)
-      origin = @rpanel.view.center - @rpanel.size/2
       sprite.texture_rect = SF.int_rect(origin.x.to_i, origin.y.to_i, @rpanel.size.x, @rpanel.size.y)
       sprite.position = origin
       @rpanel.draw(sprite)
@@ -1299,6 +1319,15 @@ class AgentBrowser
       rpanel_hint.position = (@rpanel.view.center - rpanel_hint.size/2).to_i
       @rpanel.draw(rpanel_hint)
     end
+
+    if @rpanel_inout_progress < 1.0
+      rpanel_opacity_overlay = SF::RectangleShape.new
+      rpanel_opacity_overlay.position = origin
+      rpanel_opacity_overlay.fill_color = SF::Color.new(0x4c, 0x51, 0x6b, (@rpanel_inout_progress * 255).to_i)
+      rpanel_opacity_overlay.size = @rpanel.size
+      @rpanel.draw(rpanel_opacity_overlay)
+    end
+
     @rpanel.display
 
     @screen.clear(background_color)
@@ -1337,6 +1366,32 @@ class AgentBrowser
     refresh
 
     yield SF::Sprite.new(@screen.texture)
+  end
+end
+
+class Animator
+  def initialize(@span : Time::Span, &@animatee : Float64 ->)
+    @progress = 0.0
+    @start = nil
+  end
+
+  def tick(delta : Float)
+    return unless start = @start
+
+    @progress = (Time.monotonic - start)/@span
+    if @progress > 1.0
+      @start = nil
+      @progress = 0.0
+      return
+    end
+
+    @animatee.call(@progress)
+  end
+
+  def animate
+    return if @start # TODO: reverse animation + start
+    @start = Time.monotonic
+    @animatee.call(@progress)
   end
 end
 
