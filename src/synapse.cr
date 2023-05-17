@@ -163,13 +163,13 @@ class World < Tank
     wire
   end
 
-  def each_cell
+  def each_cell(&)
     @entities.each(CellAvatar) do |cell|
       yield cell
     end
   end
 
-  def each_vein
+  def each_vein(&)
     @entities.each(Vein) do |vein|
       yield vein
     end
@@ -237,8 +237,6 @@ class World < Tank
         @emap.clear(SF::Color.new(0x21, 0x21, 0x21, 0))
 
         step = 12.at(12)
-
-        vectors = [] of SF::Vertex
 
         top_left.y.step(to: bot_right.y, by: step.y) do |y|
           top_left.x.step(to: bot_right.x, by: step.x) do |x|
@@ -515,7 +513,7 @@ class Mode::Normal < Mode
   def map(app, event : SF::Event::TextEntered)
     return super unless app.tank.inspecting?(nil)
     return super if app.tank.find_cell_at?(@mouse_in_tank)
-    return super unless (chr = event.unicode.chr).alphanumeric?
+    return super unless event.unicode.chr.alphanumeric?
 
     cell = app.tank.cell to: @mouse_in_tank
     try_inspect(app, cell)
@@ -802,7 +800,7 @@ class Console
     # Create title text
     @title = SF::Text.new(title_string, FONT_BOLD, 11)
 
-    l, c, h = LCH.rgb2lch(0x54, 0x80, 0x95)
+    l, c, _ = LCH.rgb2lch(0x54, 0x80, 0x95)
 
     # @title.fill_color = p SF::Color.new(*LCH.lch2rgb(30, c, h))
     @title.fill_color = SF::Color.new(28, 76, 95)

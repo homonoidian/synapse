@@ -53,7 +53,7 @@ class InputFieldView < BufferEditorView
   end
 
   def draw(target, states)
-    if width = @max_width
+    if @max_width
       #
       # Create ribbon if it does not exist or if its size is
       # not equal to the freshly computed field size.

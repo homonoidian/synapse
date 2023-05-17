@@ -79,7 +79,7 @@ class TextBuffer
 
   # Yields buffer string to the block. Updates buffer string
   # with block result.
-  def update(lineno = 0)
+  def update(lineno = 0, &)
     update((yield @string), lineno)
   end
 

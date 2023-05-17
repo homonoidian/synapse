@@ -67,7 +67,7 @@ class EntityCollection
   end
 
   # Yields all entities in this collection.
-  def each
+  def each(&)
     @entities.each do |_, store|
       store.each_value do |entity|
         yield entity

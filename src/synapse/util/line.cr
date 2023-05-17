@@ -28,7 +28,7 @@ struct Line
   end
 
   # Yields each character in this line.
-  def each_char
+  def each_char(&)
     e = self.e.clamp(0..@buf.size - 1) # FIXME: bug: use exlusive line end index
 
     b.upto(e) do |index|
@@ -38,7 +38,7 @@ struct Line
 
   # Yields lines starting from this line and up to *other*
   # line, both included.
-  def upto(other : Line)
+  def upto(other : Line, &)
     return unless other.in_buffer?(@buf)
 
     ord.upto(other.ord) do |mid|

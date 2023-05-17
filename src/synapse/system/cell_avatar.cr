@@ -68,7 +68,7 @@ class CellAvatar < CircularEntity
   end
 
   def halo_color
-    l, c, h = LCH.rgb2lch(@color.r, @color.g, @color.b)
+    _, _, h = LCH.rgb2lch(@color.r, @color.g, @color.b)
 
     SF::Color.new(*LCH.lch2rgb(80, 50, h))
   end
@@ -185,7 +185,6 @@ class CellAvatar < CircularEntity
     replica.summon
     replica
   end
-
 
   def replicate(to coords = mid) : CellAvatar
     replicate_with_select_protocols(to: coords) { true }

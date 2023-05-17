@@ -416,7 +416,6 @@ class ProtocolAgent < Agent
   end
 
   def succ?(of agent : RuleAgent, in browser : AgentBrowser)
-    distance = nil
     candidate = nil
     browser.each_rule_agent(of: self) do |rule|
       next unless rule.mid.x > agent.mid.x || ((rule.mid.x - agent.mid.x).abs < 8 && rule.mid.y > agent.mid.y)
@@ -1652,7 +1651,7 @@ class AgentBrowser
   end
 
   def editor_open?(editor : Editor)
-    !!@editor.try { |state| state.editor.same?(editor) }
+    !!@editor.try &.editor.same?(editor)
   end
 
   def open(opener : Agent, editor : Editor)

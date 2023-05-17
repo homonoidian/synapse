@@ -58,7 +58,7 @@ struct Cell
     PackedProtocol.new(protocol.name?.not_nil!, protocol.paused?, ruleset)
   end
 
-  def adhere(hub : AgentBrowserHub, name : String, paused : Bool, ruleset : Hash(Rule, BufferEditorColumnInstant))
+  def adhere(hub : AgentBrowserHub, name : String, paused : Bool, ruleset : Hash(Rule, BufferEditorColumnInstant), &)
     protocol = nil
 
     @graph.each_protocol_agent(named: name) do |existing|
@@ -84,7 +84,6 @@ struct Cell
       end
     end
   end
-
 
   # Yields avatars of this cell.
   def each_avatar(&)

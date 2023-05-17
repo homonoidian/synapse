@@ -155,11 +155,11 @@ struct KeywordRule < SignatureRule
 
     begin
       stack.run(@code, @signature.as(KeywordRuleSignature).@keyword)
-      result = OkResult.new
+      OkResult.new
     rescue e : Lua::LuaError
-      result = ErrResult.new(e, agent)
+      ErrResult.new(e, agent)
     rescue e : ArgumentError
-      result = ErrResult.new(e, agent)
+      ErrResult.new(e, agent)
     ensure
       stack.close
     end

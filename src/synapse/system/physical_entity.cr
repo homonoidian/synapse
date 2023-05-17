@@ -30,8 +30,8 @@ abstract class PhysicalEntity < Entity
 
       samples = jangles.map { |angle| {angle, @tank.entropy(mid + self.class.radius + angle.dir * self.class.radius)} }
 
-      min_hdg, _ = samples.min_by { |angle, entropy| entropy }
-      max_hdg, _ = samples.max_by { |angle, entropy| entropy }
+      min_hdg, _ = samples.min_by { |_, entropy| entropy }
+      max_hdg, _ = samples.max_by { |_, entropy| entropy }
 
       #
       # Compute weighed mean to get heading
@@ -55,8 +55,6 @@ abstract class PhysicalEntity < Entity
       #
       flow_vec = heading.dir
       flow_scale = fmagn_to_flow_scale(velocity.zero? ? 10 * @jitter : velocity.magn)
-      flow_scale_max = 13.572
-      flow_scale_norm = flow_scale / flow_scale_max
 
       @body.velocity += (flow_vec * flow_scale).cp * @jitter
     end

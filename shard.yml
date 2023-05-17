@@ -27,6 +27,8 @@ dependencies:
 development_dependencies:
   minitest:
     github: ysbaddaden/minitest.cr
+  ameba:
+    github: crystal-ameba/ameba
 
 targets:
   synapse:

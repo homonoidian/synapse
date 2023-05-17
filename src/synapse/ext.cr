@@ -316,7 +316,7 @@ class TimeTable
     completed = [] of UUID
 
     @tasks.each do |task, entry|
-      if complete = entry.run?
+      if entry.run?
         completed << task
       end
     end
@@ -340,7 +340,7 @@ class String
   end
 
   # Same as `each_byte` but starts iterating from *offset*-th byte.
-  def each_byte(*, from offset : Int)
+  def each_byte(*, from offset : Int, &)
     unsafe_byte_slice(offset, count: bytesize - offset).each do |byte|
       yield byte
     end
@@ -348,7 +348,7 @@ class String
 
   # Same as `each_char_with_index` but starts iterating from
   # *offset*-th character.
-  def each_char_with_index(*, from offset : Int)
+  def each_char_with_index(*, from offset : Int, &)
     if single_byte_optimizable?
       each_byte(from: offset) do |byte|
         yield (byte < 0x80 ? byte.unsafe_chr : Char::REPLACEMENT), offset
@@ -371,7 +371,7 @@ class String
   # Which match from *regexes* is selected is determined by
   # running all regexes against the remaining string, and
   # finding the *closest* one that matches.
-  def each_segment(regexes : Indexable(Regex), group = 0)
+  def each_segment(regexes : Indexable(Regex), group = 0, &)
     start = 0
 
     loop do

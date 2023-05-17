@@ -59,19 +59,19 @@ abstract class Tank
     @lens.configure(view)
   end
 
-  def each_entity
+  def each_entity(&)
     @entities.each do |entity|
       yield entity
     end
   end
 
-  def each_entity(type : T.class) forall T
+  def each_entity(type : T.class, &) forall T
     @entities.each(T) do |entity|
       yield entity
     end
   end
 
-  def each_entity_by_z_index
+  def each_entity_by_z_index(&)
     @entities.each_by_z_index do |entity|
       yield entity
     end

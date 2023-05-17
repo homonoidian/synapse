@@ -65,7 +65,7 @@ struct AgentGraph
   # Protocol agents are identified by their own globally unique ID,
   # and not by name. Therefore, having multiple protocol agents with
   # the same name is allowed.
-  def each_protocol_agent(*, named name : String)
+  def each_protocol_agent(*, named name : String, &)
     each_protocol_agent do |protocol|
       next unless protocol.name? == name
       yield protocol
@@ -83,7 +83,7 @@ struct AgentGraph
   end
 
   # Yields rule agents of the given *protocol* that match the *other* rule.
-  def each_rule_agent(*, of protocol : ProtocolAgent, matching other : Rule)
+  def each_rule_agent(*, of protocol : ProtocolAgent, matching other : Rule, &)
     each_rule_agent(of: protocol) do |rule|
       next unless rule.matches?(other)
       yield rule
@@ -332,7 +332,7 @@ struct AgentGraph
     when ProtocolAgent
       # Remove all connections possibly introduced by the removed
       # protocol to the graph.
-      return unless rules = @graph[agent]?
+      return unless @graph.has_key?(agent)
 
       @links[agent].each &.dismiss
 

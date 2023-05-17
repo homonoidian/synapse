@@ -5,7 +5,7 @@ class KeywordRuleHeaderState < RuleHeaderState
   def keyword : String
     @states[0].as(KeywordInputState).string
   end
-  
+
   def to_rule_signature : RuleSignature
     params = @states[1..].map { |state| state.as(ParamInputState).string }
 
