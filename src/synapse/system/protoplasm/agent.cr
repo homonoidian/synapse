@@ -1,3 +1,7 @@
+# Agents normally live in the `Protoplasm` (although any `Tank` will do).
+# They manage incoming vesicles as well as the lifecycle of a `Cell`. They
+# also own an `AgentEditor`, a GUI component useful for visualizing the
+# code "guts" of agents.
 abstract class Agent < CircularEntity
   include SF::Drawable
 
@@ -25,6 +29,9 @@ abstract class Agent < CircularEntity
   # Summons a copy of this agent in the given *browser*.
   abstract def copy(*, in browser : AgentBrowser)
 
+  # Summons a copy of this agent in *protoplasm*.
+  abstract def copy(protoplasm : Protoplasm)
+
   @errors = ErrorMessageViewer.new
 
   # Returns whether this agent has failed, that is, whether there
@@ -33,20 +40,20 @@ abstract class Agent < CircularEntity
     @errors.any?
   end
 
-  # Tells the error message browser of this agent to show the previous
+  # Tells the error message viewer of this agent to show the previous
   # error message, if any.
   def to_prev_error
     @errors.to_prev
   end
 
-  # Tells the error message browser of this agent to show the next
+  # Tells the error message viewer of this agent to show the next
   # error message, if any.
   def to_next_error
     @errors.to_next
   end
 
   # Handles failure of this agent with the given error *message*:
-  # tells the error message browser to display an error with the
+  # tells the error message viewer to display an error with the
   # given *message*.
   def fail(message : String)
     @errors.insert(ErrorMessage.new(message))
@@ -64,8 +71,8 @@ abstract class Agent < CircularEntity
   # Returns whether this agent is enabled.
   #
   # A disabled rule is not expressed. A disabled protocol does not
-  # let vesicles through to its rules. Unless the vesicles find
-  # another way, they won't be reacted to.
+  # let vesicles through to its rules. Unless the vesicles find their
+  # way through another, enabled protocol, they won't be reacted to.
   getter? enabled = true
 
   # Enables this agent. This agent will start to express its rule
@@ -75,7 +82,7 @@ abstract class Agent < CircularEntity
   end
 
   # Disables this agent. This means that this agent won't express its
-  # rule until it is `unpause`d.
+  # rule until it is `enable`d.
   def disable
     @enabled = false
   end
@@ -85,7 +92,7 @@ abstract class Agent < CircularEntity
     enabled? ? disable : enable
   end
 
-  # Returns the title of this agent, or nil.
+  # Returns the title (visual name) of this agent, or nil.
   #
   # The title will be displayed as a hint to the right of this agent.
   # It can be used to e.g. indicate the name of the rule expressed by
@@ -146,7 +153,7 @@ abstract class Agent < CircularEntity
     ruleset[rule] = editor.capture
   end
 
-  # Creates an edge between this and *other* agent in *browser*.
+  # Creates an edge between this and *other* agents in *browser*.
   #
   # Defined as a noop on `Agent`. Subclasses decide for themselves on
   # how (and with whom) they are going to handle connections.
@@ -164,7 +171,7 @@ abstract class Agent < CircularEntity
 
   # Fills the editor of this agent with the captured content of the
   # *other* editor.
-  def drain(other : Editor)
+  def drain(other : AgentEditor)
   end
 
   # :nodoc:
@@ -180,12 +187,13 @@ abstract class Agent < CircularEntity
     end
   end
 
-  def icon_font_size
-    14
-  end
-
+  # Specifies the outline color of this agent's circular body.
   def outline_color
     @tank.inspecting?(self) ? SF::Color.new(0x58, 0x65, 0x96) : SF::Color.new(0x4f, 0x63, 0x59)
+  end
+
+  def icon_font_size
+    14
   end
 
   def halo(color : SF::Color) : SF::Drawable
@@ -286,7 +294,7 @@ abstract class Agent < CircularEntity
     end
   end
 
-  # Draws all that overlays both the circular body and the "face" of
+  # Draws all that is above both the circular body and the "face" of
   # this agent. Namely: overlay halos, dark overlay that signals this
   # agent is paused, and the error message viewer that shows the errors
   # for this agent (if there are any).

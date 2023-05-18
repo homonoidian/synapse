@@ -129,11 +129,6 @@ end
 record OkResult < ExpressionResult
 record ErrResult < ExpressionResult, error : Lua::LuaError | ArgumentError, agent : RuleAgent
 
-module RuleExpressibleFromVesicle
-  abstract def express(receiver : CellAvatar, vesicle : Vesicle)
-  abstract def matches?(vesicle : Vesicle) : Bool
-end
-
 struct KeywordRule < SignatureRule
   def matches?(vesicle : Vesicle) : Bool
     @signature.matches?(vesicle.message)

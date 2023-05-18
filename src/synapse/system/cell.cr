@@ -129,7 +129,7 @@ struct Cell
     @graph.each_agent &.unfail
   end
 
-  # Invoked when an *avatar* of this cell is born.
+  # Called when an *avatar* of this cell is born.
   def born(avatar : CellAvatar)
     @avatars << avatar
 
@@ -138,7 +138,7 @@ struct Cell
     end
   end
 
-  # Invoked when an *avatar* of this cell dies.
+  # Called when an *avatar* of this cell dies.
   def died(avatar : CellAvatar)
     @avatars.delete(avatar)
 
@@ -147,14 +147,14 @@ struct Cell
     @relatives.delete(self)
   end
 
-  # Invoked when an *avatar* of this cell receives the given *vesicle*.
+  # Called when an *avatar* of this cell receives the given *vesicle*.
   def receive(avatar : CellAvatar, vesicle : Vesicle)
-    @graph.each_running_rule_agent_matching(vesicle) do |agent|
+    @graph.each_running_keyword_agent_matching(vesicle) do |agent|
       agent.express(receiver: avatar, vesicle: vesicle)
     end
   end
 
-  # Invoked on every tick of *avatar*. Controls expression of heartbeat
+  # Called on every tick of *avatar*. Controls expression of heartbeat
   # rules for *avatar*.
   def tick(delta : Float, avatar : CellAvatar)
     @graph.each_running_heartbeat_agent do |agent|

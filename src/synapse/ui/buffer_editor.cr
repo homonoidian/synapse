@@ -388,7 +388,7 @@ class BufferEditorView
     cur = find_character_pos(instant.cursor)
     nxt = find_character_pos(instant.cursor + 1)
 
-    @beam.position = cur + beam_margin
+    @beam.position = (cur + beam_margin).to_i
     @beam.size = beam_size(cur, nxt)
   end
 

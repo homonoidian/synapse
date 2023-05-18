@@ -130,11 +130,10 @@ struct AgentGraph
     end
   end
 
-  # Yields only those running rule agents whose rules are
-  # expressible from *vesicle* and match *vesicle*, in no
-  # particular order.
-  def each_running_rule_agent_matching(vesicle : Vesicle, &)
-    each_running_rule_agent(a: RuleExpressibleFromVesicle) do |rule|
+  # Yields only those running keyword rule agents that match
+  # *vesicle*, in no particular order.
+  def each_running_keyword_agent_matching(vesicle : Vesicle, &)
+    each_running_rule_agent(a: KeywordRuleAgent) do |rule|
       next unless rule.matches?(vesicle)
       yield rule
     end

@@ -10,11 +10,11 @@ module Inspectable
     true
   end
 
-  # Invoked when this inspectable is focused.
+  # Called when this inspectable is focused.
   def focus
   end
 
-  # Invoked when this inspectable is blurred.
+  # Called when this inspectable is blurred.
   def blur
   end
 

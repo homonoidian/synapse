@@ -30,6 +30,8 @@ end
 
 require "./synapse/system/protoplasm/edge"
 require "./synapse/system/protoplasm/agent"
+require "./synapse/system/protoplasm/protocol_agent"
+require "./synapse/system/protoplasm/rule_agent"
 require "./synapse/system/protoplasm/agent_graph"
 
 struct SF::Event::MouseButtonPressed
@@ -50,185 +52,6 @@ class Protoplasm < Tank
     @entities.each(Agent) do |agent|
       yield agent
     end
-  end
-end
-
-class ProtocolAgent < Agent
-  def_drain_as ProtocolEditor, ProtocolEditorInstant
-
-  protected getter editor = ProtocolEditor.new(ProtocolEditorState.new, ProtocolEditorView.new)
-
-  def copy(*, in browser : AgentBrowser)
-    protocol = browser.summon(ProtocolAgent, coords: mid)
-    protocol.drain(@editor)
-
-    browser.each_rule_agent(of: self, &.copy(under: protocol, in: browser))
-
-    protocol
-  end
-
-  def copy(protoplasm : Protoplasm)
-    copy = ProtocolAgent.new(protoplasm)
-    copy.mid = mid
-    copy.drain(@editor)
-    copy.summon
-    copy
-  end
-
-  def rename(name : String)
-    editor.rename(name)
-  end
-
-  def name?
-    title?
-  end
-
-  def icon
-    Icon::Protocol
-  end
-
-  def icon_color
-    SF::Color::White
-  end
-
-  def connect(*, to other : RuleAgent, in browser : AgentBrowser)
-    browser.connect(self, other)
-  end
-
-  def compatible?(other : RuleAgent, in browser : AgentBrowser)
-    !browser.connected?(self, other)
-  end
-end
-
-abstract class RuleAgent < Agent
-  def rule
-    editor.to_rule
-  end
-
-  def copy(*, in browser : AgentBrowser)
-    copy = browser.summon(self.class, coords: mid)
-    copy.drain(editor)
-    copy
-  end
-
-  def copy(*, under protocol : ProtocolAgent, in browser : AgentBrowser)
-    copy = copy(in: browser)
-    copy.mid = protocol.mid
-    copy.connect(to: protocol, in: browser)
-    copy
-  end
-
-  def copy(protoplasm : Protoplasm)
-    copy = self.class.new(protoplasm)
-    copy.mid = mid
-    copy.drain(editor)
-    copy.summon
-    copy
-  end
-
-  def connect(*, to other : ProtocolAgent, in browser : AgentBrowser)
-    browser.connect(other, self)
-  end
-
-  def compatible?(other : ProtocolAgent, in browser : AgentBrowser)
-    other.compatible?(self, in: browser)
-  end
-
-  def matches?(other : Rule)
-    rule.matches?(other)
-  end
-end
-
-class HeartbeatRuleAgent < RuleAgent
-  protected getter editor = HeartbeatRuleEditor.new(HeartbeatRuleEditorState.new, HeartbeatRuleEditorView.new)
-
-  def_drain_as HeartbeatRuleEditor, BufferEditorColumnInstant
-
-  def initialize(tank : Tank)
-    super
-
-    @start = Time.monotonic
-    @pausestart = @start
-  end
-
-  def period?
-    rule.@signature.as(HeartbeatRuleSignature).period?
-  end
-
-  def pause
-    super
-
-    @pausestart = Time.monotonic
-  end
-
-  def unpause
-    super
-
-    @start += Time.monotonic - @pausestart
-  end
-
-  def icon
-    Icon::HeartbeatRule
-  end
-
-  def icon_color
-    SF::Color.new(0xEF, 0x9A, 0x9A)
-  end
-
-  def express(receiver : CellAvatar)
-    return unless enabled?
-
-    if period = period?
-      time = Time.monotonic
-      elapsed = time - @start
-      return if elapsed < period
-
-      @start = time
-    end
-
-    rule.express(self, receiver: receiver)
-  end
-end
-
-class BirthRuleAgent < RuleAgent
-  protected getter editor = BirthRuleEditor.new(BirthRuleEditorState.new, BirthRuleEditorView.new)
-
-  def_drain_as BirthRuleEditor, BufferEditorColumnInstant
-
-  def icon
-    Icon::BirthRule
-  end
-
-  def icon_color
-    SF::Color.new(0xFF, 0xE0, 0x82)
-  end
-
-  def express(receiver : CellAvatar)
-    rule.express(self, receiver)
-  end
-end
-
-class KeywordRuleAgent < RuleAgent
-  include RuleExpressibleFromVesicle
-
-  protected getter editor = KeywordRuleEditor.new(KeywordRuleEditorState.new, KeywordRuleEditorView.new)
-
-  def_drain_as KeywordRuleEditor, BufferEditorColumnInstant
-
-  def icon
-    Icon::KeywordRule
-  end
-
-  def icon_color
-    SF::Color.new(0x90, 0xCA, 0xF9)
-  end
-
-  def matches?(vesicle : Vesicle) : Bool
-    rule.matches?(vesicle)
-  end
-
-  def express(receiver : CellAvatar, vesicle : Vesicle)
-    rule.express(self, receiver, vesicle)
   end
 end
 
@@ -873,11 +696,11 @@ class EditorPanel
   include IDraggable
   include SF::Drawable
 
-  getter editor : Editor
+  getter editor : AgentEditor
 
   @offset : Vector2
 
-  def initialize(@browser : AgentBrowser, @editor : Editor)
+  def initialize(@browser : AgentBrowser, @editor : AgentEditor)
     @offset = Vector2.new(@editor.size/2) + (browser.size.y / 4).y
   end
 
@@ -1035,11 +858,11 @@ class AgentBrowser
 
     # Create a texture with a dotted pattern
     dotted_image = SF::Image.new(100, 100, SF::Color.new(0x37, 0x37, 0x37))
-    0.step(to: 99, by: 10) do |i|
-      0.step(to: 99, by: 10) do |j|
+    0.step(to: 99, by: 20) do |i|
+      0.step(to: 99, by: 20) do |j|
         dotted_image.set_pixel(i, j, SF::Color.new(0x58, 0x58, 0x58))
         dotted_image.set_pixel(i + 1, j, SF::Color.new(0x52, 0x52, 0x52))
-        dotted_image.set_pixel(i, j + 1, SF::Color.new(0x66, 0x66, 0x66))
+        dotted_image.set_pixel(i, j + 1, SF::Color.new(0x55, 0x55, 0x55))
       end
     end
     @dotted_texture = SF::Texture.from_image(dotted_image)
@@ -1092,7 +915,7 @@ class AgentBrowser
   @editor : EditorPanel?
   @menu : Menu?
 
-  def submit(editor : Editor)
+  def submit(editor : AgentEditor)
     @states[editor.object_id] = EditorPanel.new(self, editor)
   end
 
@@ -1101,11 +924,11 @@ class AgentBrowser
     @menu = menu
   end
 
-  def withdraw(editor : Editor)
+  def withdraw(editor : AgentEditor)
     @states.delete(editor.object_id)
   end
 
-  def submitted!(editor : Editor)
+  def submitted!(editor : AgentEditor)
     unless @states.has_key?(editor.object_id)
       raise "AgentBrowser: cannot use an editor that was not submitted"
     end
@@ -1125,11 +948,11 @@ class AgentBrowser
     false
   end
 
-  def open?(editor : Editor)
+  def open?(editor : AgentEditor)
     !!@editor.try &.editor.same?(editor)
   end
 
-  def open(editor : Editor, for opener : Agent)
+  def open(editor : AgentEditor, for opener : Agent)
     submitted!(editor)
 
     editor do |prev|
@@ -1148,7 +971,7 @@ class AgentBrowser
     @animator_inout.animate
   end
 
-  def close(editor : Editor)
+  def close(editor : AgentEditor)
     submitted!(editor)
 
     puts "close #{editor}"
@@ -1385,7 +1208,7 @@ class Animator
   end
 
   def animate
-    return if @start # TODO: reverse animation + start
+    @progress = 0.0
     @start = Time.monotonic
     @value = @animatee.call(@progress)
   end

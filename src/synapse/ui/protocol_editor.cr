@@ -220,7 +220,7 @@ end
 
 # Protocol editor allows to create and edit protocols, which
 # are, simply speaking, "umbrellas" for rules.
-class ProtocolEditor < Editor
+class ProtocolEditor < AgentEditor
   include MonoBufferController(ProtocolEditorState, ProtocolEditorView)
   include BufferEditorHandler
   include BufferEditorRowHandler

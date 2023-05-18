@@ -123,7 +123,7 @@ abstract class PhysicalEntity < Entity
     @tank.entropy(mid)
   end
 
-  # Invoked when this and *other* entities collide.
+  # Called when this and *other* entities collide.
   def smack(other : PhysicalEntity)
   end
 end

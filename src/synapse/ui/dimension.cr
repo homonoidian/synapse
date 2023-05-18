@@ -164,11 +164,11 @@ abstract class DimensionState(State)
     @selected == last_index
   end
 
-  # Invoked after motion left happens from/to *state*.
+  # Called after motion left happens from/to *state*.
   def after_moved_left(state : State)
   end
 
-  # Invoked after motion right happens from/to *state*.
+  # Called after motion right happens from/to *state*.
   def after_moved_right(state : State)
   end
 

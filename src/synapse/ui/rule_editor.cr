@@ -107,7 +107,7 @@ module RuleEditorHandler
   end
 end
 
-abstract class RuleEditor < Editor
+abstract class RuleEditor < AgentEditor
   # Builds and returns a `Rule` object corresponding to the
   # contents of this rule editor.
   abstract def to_rule : Rule
