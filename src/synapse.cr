@@ -22,26 +22,6 @@ require "colorize"
 require "string_scanner"
 require "open-simplex-noise"
 
-module CellEditorEntity # FIXME: ???
-  delegate :position, :position=, to: @view
-
-  def size
-    @view.size
-  end
-
-  def move(position : SF::Vector2)
-    @view.position = position.round
-
-    refresh
-  end
-
-  def lift
-  end
-
-  def drop
-  end
-end
-
 require "./synapse/ext"
 
 require "./synapse/util/*"
@@ -91,6 +71,8 @@ FONT_BOLD.get_texture(11).smooth = false
 FONT_ITALIC.get_texture(11).smooth = false
 
 class World < Tank
+  include IEntropyProvider
+
   @scatterer : UUID
 
   def initialize
@@ -443,6 +425,7 @@ class Mode::Normal < Mode
 
   def map(app, event : SF::Event::MouseButtonReleased)
     coords = app.coords(event)
+
     # If a cell is being inspected and cursor is in bounds of
     # its editor, redirect.
     app.tank.@lens.each do |object|
@@ -1102,7 +1085,7 @@ class App
 
     # Optionally draw "time is paused" window
     unless @time
-      text = SF::Text.new("Time is paused...", FONT_UI_MEDIUM, 14)
+      text = SF::Text.new("Time is paused. Use Ctrl-P to toggle globally", FONT_UI_MEDIUM, 11)
       text.fill_color = SF::Color.new(0x99, 0x99, 0x99)
       text_size = SF.vector2f(
         text.global_bounds.width + text.local_bounds.left,
@@ -1172,6 +1155,10 @@ class App
             handled = true
           end
         else
+          if event.is_a?(SF::Event::KeyPressed) && event.control && event.code.p?
+            toggle_time
+            next
+          end
           handled = false
           coords = coords @mouse.position
           tank.@lens.each do |object|

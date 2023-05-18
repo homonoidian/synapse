@@ -1,4 +1,12 @@
+module IVesicleDecayListener # FIXME: ???
+  # Called when *vesicle* decays in the `Protoplasm` this object is
+  # listening to.
+  abstract def decayed(vesicle : Vesicle)
+end
+
 struct Cell
+  include IVesicleDecayListener
+
   class Memory
     include LuaCallable
 
@@ -28,13 +36,17 @@ struct Cell
   @avatars = Set(CellAvatar).new
 
   def initialize
-    @graph = AgentGraph.new(Protoplasm.new)
+    protoplasm = Protoplasm.new
+
+    @graph = AgentGraph.new(protoplasm)
     @relatives = Set(Cell).new
 
     @memory = uninitialized Memory
     @memory = Memory.new(self)
 
     @relatives << self
+
+    protoplasm.add_vesicle_decay_listener(self)
   end
 
   protected def initialize(@graph, @relatives)
@@ -42,6 +54,11 @@ struct Cell
     @memory = Memory.new(self)
 
     @relatives << self
+  end
+
+  def decayed(vesicle : Vesicle)
+    # FIXME: mouse | signal("mouse") is explosive, shouldn't be!
+    each_avatar &.receive(vesicle)
   end
 
   def browse(hub : AgentBrowserHub, size : Vector2) : AgentBrowser

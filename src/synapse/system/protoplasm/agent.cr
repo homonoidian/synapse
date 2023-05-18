@@ -32,6 +32,15 @@ abstract class Agent < CircularEntity
   # Summons a copy of this agent in *protoplasm*.
   abstract def copy(protoplasm : Protoplasm)
 
+  def emit(keyword : String, args : Array(Memorable), strength : Float, color : SF::Color)
+    @tank.distribute(mid,
+      message: Message.new(keyword, args),
+      color: color,
+      strength: strength,
+      deadzone: Agent.radius * 1.2,
+    )
+  end
+
   @errors = ErrorMessageViewer.new
 
   # Returns whether this agent has failed, that is, whether there

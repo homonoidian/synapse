@@ -225,10 +225,11 @@ class ProtocolEditor < AgentEditor
   include BufferEditorHandler
   include BufferEditorRowHandler
   include ProtocolEditorHandler
-  include CellEditorEntity
 
   delegate :halo?, :halo=, to: @view
   delegate :rename, to: @state
+
+  getter view
 
   def title? : String?
     name = @state.name

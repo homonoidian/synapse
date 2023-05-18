@@ -37,7 +37,7 @@ class Vesicle < CircularEntity
   end
 
   def self.mass
-    0.5
+    0.2
   end
 
   def self.friction

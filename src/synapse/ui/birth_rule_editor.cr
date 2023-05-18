@@ -133,8 +133,9 @@ class BirthRuleEditor < RuleEditor
   include BufferEditorHandler
   include BufferEditorRowHandler
   include BufferEditorColumnHandler
-  include CellEditorEntity
   include RuleEditorHandler
+
+  getter view
 
   def to_rule : Rule
     @state.to_rule

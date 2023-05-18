@@ -5,6 +5,10 @@ module IPhysicalBodyClass
   abstract def body : CP::Body
 end
 
+module IEntropyProvider
+  abstract def entropy(position : Vector2)
+end
+
 # Physical entities are entities with a physical body, that is,
 # entities with a number of physical attributes, such as position,
 # velocity, mass, etc.
@@ -27,8 +31,9 @@ abstract class PhysicalEntity < Entity
       super
 
       return if @jitter.zero?
+      return unless tank = @tank.as?(IEntropyProvider)
 
-      samples = jangles.map { |angle| {angle, @tank.entropy(mid + self.class.radius + angle.dir * self.class.radius)} }
+      samples = jangles.map { |angle| {angle, tank.entropy(mid + self.class.radius + angle.dir * self.class.radius)} }
 
       min_hdg, _ = samples.min_by { |_, entropy| entropy }
       max_hdg, _ = samples.max_by { |_, entropy| entropy }
@@ -120,7 +125,9 @@ abstract class PhysicalEntity < Entity
 
   # Returns a sample [0; 1] of entropy at this entity's position.
   def entropy
-    @tank.entropy(mid)
+    return 0.0 unless tank = @tank.as?(IEntropyProvider)
+
+    tank.entropy(mid)
   end
 
   # Called when this and *other* entities collide.

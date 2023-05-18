@@ -63,6 +63,7 @@ abstract class Entity
   def dismiss
     # Important! Unregister timer if we've still not reached it.
     @decay.try { |id| @watch.cancel(id) }
+    @decay = nil
     @tank.remove(self)
 
     nil

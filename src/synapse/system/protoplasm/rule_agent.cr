@@ -5,6 +5,10 @@
 # lifecycle: they handle the host's birth and heartbeat, two of the most
 # important lifecycle events.
 abstract class RuleAgent < Agent
+  def self.mass
+    1e2
+  end
+
   # Returns the `Rule` corresponding to this agent.
   def rule
     editor.to_rule

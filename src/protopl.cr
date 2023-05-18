@@ -46,12 +46,24 @@ class Protoplasm < Tank
 
     @space.gravity = CP.v(0, 0)
     @space.damping = 0.4
+
+    @listeners = [] of IVesicleDecayListener
   end
 
   def each_agent(& : Agent ->)
     @entities.each(Agent) do |agent|
       yield agent
     end
+  end
+
+  def add_vesicle_decay_listener(listener : IVesicleDecayListener)
+    @listeners << listener
+  end
+
+  def remove(entity : Vesicle)
+    super
+
+    @listeners.each &.decayed(entity)
   end
 end
 

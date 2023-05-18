@@ -3,9 +3,9 @@
 # agents unreachable -- globally unreachable if they can't be reached
 # through another protocol.
 class ProtocolAgent < Agent
-  def_drain_as ProtocolEditor, ProtocolEditorInstant
-
   protected getter editor = ProtocolEditor.new(ProtocolEditorState.new, ProtocolEditorView.new)
+
+  def_drain_as ProtocolEditor, ProtocolEditorInstant
 
   # Copies this protocol agent and all subordinate rule agents, asking
   # *browser* for all necessary information. Then, connects the copied

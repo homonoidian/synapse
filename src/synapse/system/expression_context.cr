@@ -7,7 +7,7 @@
 # another to what the receiver cell will do, or have had observed using
 # one of its devices.
 class ExpressionContext
-  def initialize(@receiver : CellAvatar)
+  def initialize(@agent : RuleAgent, @receiver : CellAvatar)
     @strength = 120.0
     @random = Random::PCG32.new(Time.local.to_unix.to_u64!)
   end
@@ -371,10 +371,47 @@ class ExpressionContext
     end
 
     unless keyword = stack.pop.as?(String)
-      raise Lua::RuntimeError.new("send(keyword): keyword must be a string")
+      raise Lua::RuntimeError.new("send(keyword, ...args): keyword must be a string")
     end
 
     @receiver.emit(keyword, args, @strength, color: CellAvatar.color(l: 80, c: 70))
+
+    1
+  end
+
+  def signal(state : LibLua::State)
+    stack = Lua::Stack.new(state, :all)
+
+    if stack.size.zero?
+      raise Lua::RuntimeError.new("signal(keyword, ...args): keyword is required")
+    end
+
+    args = Array(Memorable).new(stack.size - 1)
+
+    until stack.size == 1
+      arg = stack.top
+      stack.remove(1)
+
+      if arg.is_a?(Lua::Callable)
+        arg = arg.to_crystal
+      end
+
+      unless arg.is_a?(MemorableValue) || arg.is_a?(OwnedProtocol)
+        raise Lua::RuntimeError.new("signal(keyword, ...args): argument must be an owned protocol, boolean, number, table, string, or nil")
+      end
+
+      if arg.is_a?(OwnedProtocol)
+        arg = @receiver.pack(arg._protocol)
+      end
+
+      args.unshift(arg)
+    end
+
+    unless keyword = stack.pop.as?(String)
+      raise Lua::RuntimeError.new("signal(keyword, ...args): keyword must be a string")
+    end
+
+    @agent.emit(keyword, args, @strength, color: CellAvatar.color(l: 80, c: 70))
 
     1
   end
@@ -458,6 +495,7 @@ class ExpressionContext
     stack.set_global("swim", ->swim(LibLua::State))
     stack.set_global("print", ->print(LibLua::State))
     stack.set_global("adhere", ->adhere(LibLua::State))
+    stack.set_global("signal", ->signal(LibLua::State))
 
     # Expose owned protocols to the expressed rule so
     # it can e.g. toggle them on/off or share them.
@@ -494,8 +532,8 @@ end
 #
 # Exposes some information about the message and vesicle itself.
 class VesicleExpressionContext < ExpressionContext
-  def initialize(receiver : CellAvatar, @vesicle : Vesicle, @attack = 0.0)
-    super(receiver)
+  def initialize(agent : RuleAgent, receiver : CellAvatar, @vesicle : Vesicle, @attack = 0.0)
+    super(agent, receiver)
 
     @message = @vesicle.message
   end

@@ -52,7 +52,7 @@ class CellAvatar < CircularEntity
   end
 
   def self.mass
-    100000.0 # TODO: WTF
+    1e5
   end
 
   SWATCH = (0..360).cycle.step(24)

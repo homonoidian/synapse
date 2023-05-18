@@ -33,8 +33,9 @@ class HeartbeatRuleEditor < RuleEditor
   include BufferEditorHandler
   include BufferEditorRowHandler
   include KeywordRuleEditorHandler
-  include CellEditorEntity
   include RuleEditorHandler
+
+  getter view
 
   def title? : String?
     @state.period?

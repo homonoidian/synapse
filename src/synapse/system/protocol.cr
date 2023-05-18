@@ -76,7 +76,7 @@ struct BirthRule < Rule
   def result(agent : BirthRuleAgent, receiver : CellAvatar) : ExpressionResult
     stack = Lua::Stack.new
 
-    res = BirthExpressionContext.new(receiver)
+    res = BirthExpressionContext.new(agent, receiver)
     res.fill(stack)
 
     begin
@@ -141,7 +141,7 @@ struct KeywordRule < SignatureRule
 
     stack = Lua::Stack.new
 
-    ctx = VesicleExpressionContext.new(receiver, vesicle, attack)
+    ctx = VesicleExpressionContext.new(agent, receiver, vesicle, attack)
     ctx.fill(stack)
 
     @signature.as(KeywordRuleSignature).@params.zip(vesicle.message.args) do |param, arg|
@@ -170,7 +170,7 @@ struct HeartbeatRule < SignatureRule
     stack = Lua::Stack.new
 
     # TODO: heartbeatresponsecontext, mainly to change period dynamically
-    res = ExpressionContext.new(receiver)
+    res = ExpressionContext.new(agent, receiver)
     res.fill(stack)
 
     begin

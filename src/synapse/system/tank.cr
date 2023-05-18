@@ -155,32 +155,34 @@ abstract class Tank
   @vesicles_texture = SF::RenderTexture.new
   @vesicles_hash : UInt64?
 
+  @vesicles = [] of SF::Vertex
+
   def draw(what : Symbol, target : SF::RenderTarget)
     view = target.view
 
-    top_left = view.center - SF.vector2f(view.size.x/2, view.size.y/2)
+    top_left = view.center - SF.vector2f(view.size.x//2, view.size.y//2)
     bot_right = top_left + view.size
-    extent = bot_right - top_left
 
     vesicles_hash = {top_left, bot_right}.hash
 
     unless vesicles_hash == @vesicles_hash
+      extent = bot_right - top_left
       # Recreate vesicles texture if size changed. Become the
       # same size as target.
       @vesicles_texture.create(extent.x.to_i, extent.y.to_i)
     end
 
     @vesicles_hash = vesicles_hash
-    @vesicles_texture.view = view
     @vesicles_texture.clear(SF::Color.new(0x21, 0x21, 0x21, 0))
+    @vesicles_texture.view = SF::View.new(view.center, view.size)
 
-    vesicles = SF::VertexArray.new(SF::Points, @entities.count(Vesicle))
-
+    @vesicles.clear
     @entities.each(Vesicle) do |vesicle|
-      vesicles.append(vesicle.to_vertex)
+      @vesicles << vesicle.to_vertex
     end
 
-    @vesicles_texture.draw(vesicles)
+    @vesicles_texture.draw(@vesicles, SF::Points)
+    @vesicles_texture.display
 
     #
     # Draw entities ordered by their z index.
@@ -191,8 +193,6 @@ abstract class Tank
 
       target.draw(entity)
     end
-
-    @vesicles_texture.display
 
     sprite = SF::Sprite.new(@vesicles_texture.texture)
     sprite.position = top_left
