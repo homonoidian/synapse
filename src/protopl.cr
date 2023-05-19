@@ -783,11 +783,13 @@ class ErrorMessage
     @text.fill_color = SF::Color.new(0xB7, 0x1C, 0x1C)
     target.draw(@text)
   end
+
+  def_equals_and_hash @message
 end
 
 class ErrorMessageViewer
   def initialize
-    @errors = [] of ErrorMessage
+    @errors = {} of ErrorMessage => Int32
     @current = 0
   end
 
@@ -816,7 +818,12 @@ class ErrorMessageViewer
   end
 
   def insert(error : ErrorMessage)
-    @errors << error
+    if @errors.has_key?(error)
+      @errors[error] += 1
+      return
+    end
+
+    @errors[error] = 0
     @current = @errors.size - 1
   end
 
@@ -837,7 +844,7 @@ class ErrorMessageViewer
   def paint(*, on target : SF::RenderTarget, for agent : Agent)
     return unless any?
 
-    error = @errors[@current]
+    error = @errors.keys[@current]
 
     extent = Vector2.new(error.size) + padding*2
     origin = agent.mid - extent.y + agent.class.radius.xy * 1.5.at(-1.5)
