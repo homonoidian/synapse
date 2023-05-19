@@ -59,7 +59,7 @@ abstract class PhysicalEntity < Entity
       # Compute flow vector and flow scale.
       #
       flow_vec = heading.dir
-      flow_scale = fmagn_to_flow_scale(velocity.zero? ? 10 * @jitter : velocity.magn)
+      flow_scale = @tank.magn_to_flow_scale(velocity.zero? ? 10 * @jitter : velocity.magn)
 
       @body.velocity += (flow_vec * flow_scale).cp * @jitter
     end

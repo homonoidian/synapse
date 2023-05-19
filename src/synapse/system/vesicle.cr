@@ -49,7 +49,7 @@ class Vesicle < CircularEntity
   end
 
   def tick(delta : Float)
-    @jitter = fmessage_strength_to_jitter(@strength * (1 - decay))
+    @jitter = @tank.strength_to_jitter_mix(@strength * (1 - decay))
 
     super
   end

@@ -29,6 +29,42 @@ abstract class Tank
     @space.add_collision_handler(dispatcher)
   end
 
+  def strength_to_vesicle_count(strength : Float)
+    # https://www.desmos.com/calculator/bk3g3l6txg
+
+    if strength <= 80
+      1.8256 * Math.log(strength)
+    elsif strength <= 150
+      6/1225 * (strength - 80)**2 + 8
+    else
+      8 * Math.log(strength - 95.402)
+    end
+  end
+
+  def strength_to_vesicle_lifespan(strength : Float)
+    if strength <= 155
+      2000 * Math::E**(-strength/60)
+    elsif strength <= 700
+      Math::E**(strength/100) + 146
+    else
+      190 * Math.log(strength)
+    end
+  end
+
+  def strength_to_jitter_mix(strength : Float)
+    strength.in?(0.0..1000.0) ? 1 - (1/1000 * strength**2)/1000 : 0.0
+  end
+
+  def magn_to_flow_scale(magn : Float)
+    if 3.684 <= magn
+      50/magn
+    elsif magn > 0
+      magn**2
+    else
+      0
+    end
+  end
+
   def print(string : String)
   end
 
@@ -128,7 +164,7 @@ abstract class Tank
   end
 
   def distribute(origin : Vector2, message : Message, color : SF::Color, strength : Float, deadzone = CellAvatar.radius * 1.2)
-    vamt = fmessage_amount(strength)
+    vamt = strength_to_vesicle_count(strength)
 
     return unless vamt.in?(1.0..1024.0) # safety belt
 
@@ -136,7 +172,7 @@ abstract class Tank
 
     vamt = vamt.to_i
     vrays = vrays.to_i
-    vlifespan = fmessage_lifespan_ms(strength).milliseconds
+    vlifespan = strength_to_vesicle_lifespan(strength).milliseconds
 
     vamt.times do |v|
       angle = Math.radians(((v / vrays) * 360) + rand * 360)
