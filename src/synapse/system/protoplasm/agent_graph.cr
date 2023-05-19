@@ -323,8 +323,7 @@ struct AgentGraph
       @edges.each do |edge|
         next unless edge.any?(agent)
 
-        # Edge removes itself from the graph when it
-        # is dismissed.
+        # Edge removes itself from the graph when it is dismissed.
         edge.dismiss
       end
 

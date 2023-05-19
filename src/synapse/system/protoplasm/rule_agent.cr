@@ -42,8 +42,12 @@ abstract class RuleAgent < Agent
     copy
   end
 
+  # Called when this rule agent is connected to a protocol agent *agent*.
+  def connected(agent : ProtocolAgent)
+  end
+
   def connect(*, to other : ProtocolAgent, in browser : AgentBrowser)
-    browser.connect(other, self)
+    other.connect(to: self, in: browser)
   end
 
   def compatible?(other : ProtocolAgent, in browser : AgentBrowser)
@@ -64,6 +68,28 @@ class BirthRuleAgent < RuleAgent
   # *receiver* cell avatar.
   def express(receiver : CellAvatar)
     rule.express(self, receiver)
+  end
+
+  # The captured state of the editor. Used to figure out whether the
+  # content of the editor changed between two blurs.
+  @_state : BufferEditorColumnInstant?
+
+  def blur
+    state = editor.capture
+
+    unless @_state == state
+      # Here begins the long and winding route to the host cell(s?) and
+      # its (their?) avatars...
+      notify(:birth_rule_changed)
+    end
+
+    @_state = state
+
+    super
+  end
+
+  def connected(agent : ProtocolAgent)
+    notify(:birth_rule_changed)
   end
 
   def icon

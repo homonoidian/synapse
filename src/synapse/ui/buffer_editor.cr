@@ -5,7 +5,12 @@
 #
 # Also allows clients to peek into `BufferEditorState` at
 # discrete time steps for change-awareness.
-record BufferEditorInstant, timestamp : Int64, string : String, cursor : Int32
+record BufferEditorInstant, timestamp : Int64, string : String, cursor : Int32 do
+  # Returns whether two buffer editor instants are equal.
+  #
+  # **Important**: timestamps are not compared.
+  def_equals string, cursor
+end
 
 # Wraps some user-friendly editor logic around a string.
 class BufferEditorState

@@ -29,6 +29,11 @@ class DimensionInstant(SubInstant)
 
   def initialize(@timestamp, @states, @selected)
   end
+
+  # Returns whether two dimension instants are equal.
+  #
+  # **Important**: timestamps are not compared.
+  def_equals states, selected
 end
 
 # Generic control logic for a dimension (e.g. row, column) of

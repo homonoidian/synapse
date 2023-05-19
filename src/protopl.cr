@@ -28,6 +28,10 @@ module IHaloSupport
   end
 end
 
+module INotificationProvider
+  abstract def notify(keyword : Symbol)
+end
+
 require "./synapse/system/protoplasm/edge"
 require "./synapse/system/protoplasm/agent"
 require "./synapse/system/protoplasm/protocol_agent"
@@ -41,13 +45,13 @@ end
 # ---------------------------------------------------------------------
 
 class Protoplasm < Tank
+  include INotificationProvider
+
   def initialize
     super
 
     @space.gravity = CP.v(0, 0)
     @space.damping = 0.4
-
-    @listeners = [] of IVesicleDecayListener
   end
 
   def each_agent(& : Agent ->)
@@ -56,14 +60,26 @@ class Protoplasm < Tank
     end
   end
 
-  def add_vesicle_decay_listener(listener : IVesicleDecayListener)
-    @listeners << listener
+  @decay_handlers = [] of IVesicleDecayHandler
+
+  def add_vesicle_decay_handler(handler : IVesicleDecayHandler)
+    @decay_handlers << handler
+  end
+
+  @notification_handlers = [] of INotificationHandler
+
+  def add_notification_handler(handler : INotificationHandler)
+    @notification_handlers << handler
+  end
+
+  def notify(keyword : Symbol)
+    @notification_handlers.each &.notify(keyword)
   end
 
   def remove(entity : Vesicle)
     super
 
-    @listeners.each &.decayed(entity)
+    @decay_handlers.each &.decayed(entity)
   end
 end
 
@@ -517,6 +533,28 @@ class AgentBrowserDispatcher < EventAuthority
     end
   end
 
+  def handle(event : SF::Event::TextEntered)
+    chr = event.unicode.chr
+    unless chr.printable?
+      forward(event)
+      return
+    end
+
+    # Forward if something agent is selected.
+    unless @browser.inspecting?(nil)
+      forward(event)
+      return
+    end
+
+    # Forward if something is under the cursor. Create a protocol agent
+    # if nothing is under the cursor.
+    agent = @browser.find_at_pixel?(@browser.mouse, entity: Agent)
+    agent ||= @browser.summon(ProtocolAgent, pixel: (@browser.size.x*0.6).at(@browser.size.y)/2)
+    @browser.inspect(agent)
+
+    forward(event)
+  end
+
   def handle(event : SF::Event)
     forward(event)
   end
@@ -713,7 +751,8 @@ class EditorPanel
   @offset : Vector2
 
   def initialize(@browser : AgentBrowser, @editor : AgentEditor)
-    @offset = Vector2.new(@editor.size/2) + (browser.size.y / 4).y
+    @offset = 0.at(0)
+    @editor.position -= @editor.size/2
   end
 
   def dragged(delta : Vector2)
@@ -880,10 +919,6 @@ class AgentBrowser
     @dotted_texture = SF::Texture.from_image(dotted_image)
     @dotted_texture.repeated = true
 
-    @animator_inout = Animator.new(1.second) do |progress|
-      1 - Math.sqrt(1 - (1 - progress) ** 2)
-    end
-
     @protoplasm.each_agent do |agent|
       agent.register(in: self)
     end
@@ -891,6 +926,7 @@ class AgentBrowser
 
   delegate :connect, :disconnect, :connected?, :each_protocol_agent, :each_rule_agent, to: @graph
   delegate :mouse, :push_cursor, :pop_cursor, to: @hub
+  delegate :inspecting?, to: @protoplasm
 
   def close
     @hub.close
@@ -980,7 +1016,6 @@ class AgentBrowser
     editor.focus
 
     @editor = @states[editor.object_id]
-    @animator_inout.animate
   end
 
   def close(editor : AgentEditor)
@@ -1000,7 +1035,6 @@ class AgentBrowser
       close(prev)
 
       @editor = nil
-      @animator_inout.animate
     end
   end
 
@@ -1098,7 +1132,6 @@ class AgentBrowser
   end
 
   def tick(delta : Float)
-    @animator_inout.tick(delta)
     @protoplasm.tick(delta)
   end
 
@@ -1148,14 +1181,6 @@ class AgentBrowser
       @rpanel.draw(rpanel_hint)
     end
 
-    if 1.0 - @animator_inout.value > 0.01
-      rpanel_opacity_overlay = SF::RectangleShape.new
-      rpanel_opacity_overlay.position = origin
-      rpanel_opacity_overlay.fill_color = SF::Color.new(0x44, 0x44, 0x44, (@animator_inout.value * 255).to_i)
-      rpanel_opacity_overlay.size = @rpanel.size
-      @rpanel.draw(rpanel_opacity_overlay)
-    end
-
     @rpanel.display
 
     @screen.clear(background_color)
@@ -1194,35 +1219,6 @@ class AgentBrowser
     refresh
 
     yield SF::Sprite.new(@screen.texture)
-  end
-end
-
-class Animator
-  getter value
-
-  def initialize(@span : Time::Span, &@animatee : Float64 -> Float64)
-    @progress = 0.0
-    @value = 0.0
-    @start = nil
-  end
-
-  def tick(delta : Float)
-    return unless start = @start
-
-    @progress = (Time.monotonic - start)/@span
-    if @progress > 1.0
-      @start = nil
-      @progress = 0.0
-      return
-    end
-
-    @value = @animatee.call(@progress)
-  end
-
-  def animate
-    @progress = 0.0
-    @start = Time.monotonic
-    @value = @animatee.call(@progress)
   end
 end
 

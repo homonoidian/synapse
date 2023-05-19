@@ -5,15 +5,11 @@
 #
 # Also allows clients to peek into `LabelState` at discrete time
 # steps for change-awareness.
-class LabelInstant
-  # Returns the timestamp when this instant was captured.
-  getter timestamp : Int64
-
-  # Returns the label caption: the string displayed by the label.
-  getter caption : String
-
-  def initialize(@timestamp, @caption)
-  end
+record LabelInstant, timestamp : Int64, caption : String do
+  # Returns whether two label instants are equal.
+  #
+  # **Important**: timestamps are not compared.
+  def_equals caption
 end
 
 # State for a label: a component that displays a string.

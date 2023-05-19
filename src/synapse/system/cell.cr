@@ -1,11 +1,16 @@
-module IVesicleDecayListener # FIXME: ???
+module IVesicleDecayHandler # FIXME: ???
   # Called when *vesicle* decays in the `Protoplasm` this object is
   # listening to.
   abstract def decayed(vesicle : Vesicle)
 end
 
+module INotificationHandler # FIXME: ???
+  abstract def notify(keyword : Symbol)
+end
+
 struct Cell
-  include IVesicleDecayListener
+  include IVesicleDecayHandler
+  include INotificationHandler
 
   class Memory
     include LuaCallable
@@ -46,7 +51,8 @@ struct Cell
 
     @relatives << self
 
-    protoplasm.add_vesicle_decay_listener(self)
+    protoplasm.add_vesicle_decay_handler(self)
+    protoplasm.add_notification_handler(self)
   end
 
   protected def initialize(@graph, @relatives)
@@ -59,6 +65,13 @@ struct Cell
   def decayed(vesicle : Vesicle)
     # FIXME: mouse | signal("mouse") is explosive, shouldn't be!
     each_avatar &.receive(vesicle)
+  end
+
+  def notify(keyword : Symbol)
+    case keyword
+    when :birth_rule_changed
+      each_avatar { |avatar| born(avatar) }
+    end
   end
 
   def browse(hub : AgentBrowserHub, size : Vector2) : AgentBrowser

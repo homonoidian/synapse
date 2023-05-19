@@ -205,10 +205,6 @@ class CellAvatar < CircularEntity
 
   def blur
     @browser.upload(@cell)
-
-    # FIXME: hack: Rerun birth rules unconditionally. But this
-    # should happen only if they changed!
-    @cell.born(avatar: self)
   end
 
   def tick(delta : Float)

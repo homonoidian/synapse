@@ -22,6 +22,11 @@ class ProtocolEditorInstant < BufferEditorRowInstant
   def initialize(instant : BufferEditorRowInstant, id : UUID, enabled : Bool)
     initialize(instant.timestamp, instant.states, instant.selected, id, enabled)
   end
+
+  # Returns whether two protocol editor instants are equal.
+  #
+  # **Important**: timestamps are not compared.
+  def_equals states, selected, id, enabled?
 end
 
 # State for a protocol editor.

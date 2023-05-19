@@ -41,6 +41,12 @@ abstract class Agent < CircularEntity
     )
   end
 
+  def notify(keyword : Symbol)
+    return unless tank = @tank.as?(INotificationProvider)
+
+    tank.notify(keyword)
+  end
+
   @errors = ErrorMessageViewer.new
 
   # Returns whether this agent has failed, that is, whether there

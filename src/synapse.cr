@@ -493,7 +493,7 @@ class Mode::Normal < Mode
     return super if app.tank.find_cell_at?(@mouse_in_tank)
     return super unless event.unicode.chr.alphanumeric?
 
-    cell = app.tank.cell to: @mouse_in_tank
+    cell = app.tank.cell to: app.coords(SF::Mouse.get_position(app.@editor_window))
     try_inspect(app, cell)
 
     super

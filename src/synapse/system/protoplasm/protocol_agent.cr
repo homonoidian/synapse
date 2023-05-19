@@ -47,6 +47,7 @@ class ProtocolAgent < Agent
 
   def connect(*, to other : RuleAgent, in browser : AgentBrowser)
     browser.connect(self, other)
+    other.connected(self)
   end
 
   def compatible?(other : RuleAgent, in browser : AgentBrowser)
