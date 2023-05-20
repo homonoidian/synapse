@@ -15,7 +15,7 @@ struct Cell
   class Memory
     include LuaCallable
 
-    def initialize(@cell : Cell)
+    def initialize
       @store = {} of String => Memorable
     end
 
@@ -44,11 +44,9 @@ struct Cell
     protoplasm = Protoplasm.new
 
     @graph = AgentGraph.new(protoplasm)
+    @memory = Memory.new
+
     @relatives = Set(Cell).new
-
-    @memory = uninitialized Memory
-    @memory = Memory.new(self)
-
     @relatives << self
 
     protoplasm.add_vesicle_decay_handler(self)
@@ -56,9 +54,7 @@ struct Cell
   end
 
   protected def initialize(@graph, @relatives)
-    @memory = uninitialized Memory
-    @memory = Memory.new(self)
-
+    @memory = Memory.new
     @relatives << self
   end
 
@@ -163,7 +159,7 @@ struct Cell
   def born(avatar : CellAvatar)
     @avatars << avatar
 
-    @graph.each_running_birth_agent do |agent|
+    @graph.each_enabled_birth_agent do |agent|
       agent.express(receiver: avatar)
     end
   end
@@ -179,16 +175,22 @@ struct Cell
 
   # Called when an *avatar* of this cell receives the given *vesicle*.
   def receive(avatar : CellAvatar, vesicle : Vesicle)
-    @graph.each_running_keyword_agent_matching(vesicle) do |agent|
+    @graph.each_enabled_keyword_agent_matching(vesicle) do |agent|
       agent.express(receiver: avatar, vesicle: vesicle)
     end
   end
 
-  # Called on every tick of *avatar*. Controls expression of heartbeat
-  # rules for *avatar*.
+  @_rules = Set(HeartbeatRuleAgent).new
+
+  # Called on every tick of *avatar*. Gives opportunity of expression to
+  # heartbeat rules of *avatar*.
   def tick(delta : Float, avatar : CellAvatar)
-    @graph.each_running_heartbeat_agent do |agent|
-      agent.express(receiver: avatar)
+    @graph.each_protocol_agent do |protocol|
+      @_rules.clear
+      @graph.each_rule_agent(of: protocol, a: HeartbeatRuleAgent) do |rule|
+        @_rules << rule
+      end
+      protocol.heartbeat(agents_readonly: @_rules, receiver: avatar)
     end
   end
 

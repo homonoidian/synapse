@@ -108,14 +108,10 @@ end
 class HeartbeatRuleAgent < RuleAgent
   protected getter editor = HeartbeatRuleEditor.new(HeartbeatRuleEditorState.new, HeartbeatRuleEditorView.new)
 
-  def initialize(tank : Tank)
-    super
-
-    @start = Time.monotonic
-    @pausestart = @start
-  end
-
   def_drain_as HeartbeatRuleEditor, BufferEditorColumnInstant
+
+  # Returns the time when this agent was last paused.
+  getter pausestart = Time.monotonic
 
   # Returns the period of this heartbeat agent. If nil is returned, this
   # agent wants to run every tick. Otherwise, the returned `Time::Span`
@@ -124,30 +120,13 @@ class HeartbeatRuleAgent < RuleAgent
     rule.@signature.as(HeartbeatRuleSignature).period?
   end
 
-  # Expresses this heartbeat agent's rule if time is due for the
-  # given *receiver* cell avatar.
+  # Expresses this heartbeat agent's rule unconditionally.
   #
-  # By invoking this method, the caller gives this heartbeat agent
-  # an opportunity to expresses its associated rule, but it may not
-  # necessarily choose to express it.
+  # Note: you probably don't want to call this method. Take a look
+  # at `ProtocolAgent#heartbeat`. It's (mostly) protocol agents
+  # that govern heartbeat agent scheduling and execution.
   def express(receiver : CellAvatar)
-    return unless enabled?
-
-    if period = period?
-      time = Time.monotonic
-      elapsed = time - @start
-      return if elapsed < period
-
-      @start = time
-    end
-
     rule.express(self, receiver: receiver)
-  end
-
-  def enable
-    super
-
-    @start += Time.monotonic - @pausestart
   end
 
   def disable

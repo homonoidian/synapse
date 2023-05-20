@@ -75,8 +75,8 @@ struct AgentGraph
     end
   end
 
-  # Yields rule agents of the given *protocol* in no particular order.
-  # Does nothing if *protocol* is not a vertex of this graph.
+  # Yields rule agents connected to the given *protocol* in no particular
+  # order. Does nothing if *protocol* is not a vertex of this graph.
   def each_rule_agent(*, of protocol : ProtocolAgent, &)
     return unless rules = @graph[protocol]?
 
@@ -85,7 +85,17 @@ struct AgentGraph
     end
   end
 
-  # Yields rule agents of the given *protocol* that match the *other* rule.
+  # Yields rule agents of type *type* connected to the given *protocol*
+  # in no particular order.
+  def each_rule_agent(*, of protocol : ProtocolAgent, a type : T.class, &) forall T
+    each_rule_agent(of: protocol) do |rule|
+      next unless rule.is_a?(T)
+      yield rule
+    end
+  end
+
+  # Yields rule agents connected to the given *protocol* that match
+  # the *other* rule.
   def each_rule_agent(*, of protocol : ProtocolAgent, matching other : Rule, &)
     each_rule_agent(of: protocol) do |rule|
       next unless rule.matches?(other)
@@ -93,57 +103,57 @@ struct AgentGraph
     end
   end
 
-  # Yields all *running* (not paused) rule agents from this graph in
-  # no particular order.
+  # Yields all *enabled* rule agents from this graph in no particular
+  # order, followed by their protocol.
   #
-  # For a rule agent to be considered running, it must not be paused
+  # For a rule agent to be considered enabled, it must not be paused
   # itself, and one of the protocol agents it is connected to must
   # not be paused (i.e. the rule agent must be reachable via a protocol
-  # agent that is itself running).
-  def each_running_rule_agent(&)
+  # agent that is itself enabled).
+  def each_enabled_rule_agent(&)
     @graph.each do |protocol, rules|
       next unless protocol.enabled?
 
       rules.each do |rule|
         next unless rule.enabled?
-        yield rule
+        yield rule, protocol
       end
     end
   end
 
-  # Yields all *running* rule agents of the given *type*, in no
-  # particular order.
+  # Yields all *enabled* rule agents of the given *type* in no
+  # particular order, followed by their protocol.
   #
-  # See `each_running_rule_agent`.
-  def each_running_rule_agent(*, a type : T.class, &) forall T
-    each_running_rule_agent do |rule|
+  # See `each_enabled_rule_agent`.
+  def each_enabled_rule_agent(*, a type : T.class, &) forall T
+    each_enabled_rule_agent do |rule, protocol|
       next unless rule.is_a?(T)
-      yield rule
+      yield rule, protocol
     end
   end
 
-  # Yields running birth rule agents from this graph, in no
-  # particular order.
-  def each_running_birth_agent(&)
-    each_running_rule_agent(a: BirthRuleAgent) do |rule|
-      yield rule
+  # Yields enabled birth rule agents from this graph in no
+  # particular order, followed by their protocol.
+  def each_enabled_birth_agent(&)
+    each_enabled_rule_agent(a: BirthRuleAgent) do |rule, protocol|
+      yield rule, protocol
     end
   end
 
-  # Yields only those running keyword rule agents that match
-  # *vesicle*, in no particular order.
-  def each_running_keyword_agent_matching(vesicle : Vesicle, &)
-    each_running_rule_agent(a: KeywordRuleAgent) do |rule|
+  # Yields only those enabled keyword rule agents that match *vesicle*,
+  # in no particular order, followed by their protocol.
+  def each_enabled_keyword_agent_matching(vesicle : Vesicle, &)
+    each_enabled_rule_agent(a: KeywordRuleAgent) do |rule, protocol|
       next unless rule.matches?(vesicle)
-      yield rule
+      yield rule, protocol
     end
   end
 
-  # Yields running heartbeat rule agents from this graph, in
-  # no particular order.
-  def each_running_heartbeat_agent(&)
-    each_running_rule_agent(a: HeartbeatRuleAgent) do |rule|
-      yield rule
+  # Yields enabled heartbeat rule agents from this graph in no
+  # particular order, followed by their protocol.
+  def each_enabled_heartbeat_agent(&)
+    each_enabled_rule_agent(a: HeartbeatRuleAgent) do |rule, protocol|
+      yield rule, protocol
     end
   end
 
