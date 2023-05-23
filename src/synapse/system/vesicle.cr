@@ -54,7 +54,7 @@ class Vesicle < CircularEntity
     super
   end
 
-  def smack(other : CellAvatar)
+  def acknowledge(other : CellAvatar)
     other.receive(self)
   end
 

@@ -10,8 +10,8 @@ abstract class Tank
       return true unless a = @tank.find_entity_by_body?(ba)
       return true unless b = @tank.find_entity_by_body?(bb)
 
-      a.smack(b)
-      b.smack(a)
+      a.acknowledge(b)
+      b.acknowledge(a)
 
       true
     end

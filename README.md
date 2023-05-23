@@ -25,9 +25,15 @@ TODO: Write a description here
 On the GIFs below you'll notice the interesting stuff as well as the bugs/not-working
 stuff. At least have fun watching them haha :)
 
+GIFs compress a lot. In reality, Synapse is a lot more so to speak "fluid".
+
 **A sneak peak of Synapse** :
 
 ![Screenshot](./res/screenshot.png)
+
+**Some sort of random program. Looks cool**:
+
+![Animation of the above](./res/follower.gif)
 
 Important: the following gifs use the old UI, and I'm too lazy to re-record them.
 

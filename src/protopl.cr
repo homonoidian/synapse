@@ -128,24 +128,24 @@ class EndHandlingEvent < Exception
   end
 end
 
-class EventAuthorityRegistry
+class EventMachineRegistry
   def initialize
-    @registered = [] of EventAuthority
+    @registered = [] of EventMachine
   end
 
-  def register(authority : EventAuthority)
-    if authority.major?
-      # Put major handlers in front. Major handlers usually throw
+  def register(machine : EventMachine)
+    if machine.master?
+      # Put master machines in front. Major machines usually throw
       # the EndHandling exception to signal that event handling
       # should stop.
-      @registered.unshift(authority)
+      @registered.unshift(machine)
     else
-      @registered.push(authority)
+      @registered.push(machine)
     end
   end
 
-  def unregister(authority : EventAuthority)
-    @registered.delete(authority)
+  def unregister(machine : EventMachine)
+    @registered.delete(machine)
   end
 
   def clear
@@ -160,11 +160,11 @@ class EventAuthorityRegistry
   end
 end
 
-abstract class EventAuthority
-  def initialize(@registry : EventAuthorityRegistry)
+abstract class EventMachine
+  def initialize(@registry : EventMachineRegistry)
   end
 
-  def major?
+  def master?
     false
   end
 
@@ -172,10 +172,10 @@ abstract class EventAuthority
   end
 end
 
-class DragHandler < EventAuthority
+class DragHandler < EventMachine
   @grip : Vector2
 
-  def initialize(registry : EventAuthorityRegistry, @item : IDraggable, grip : Vector2, @oneshot = false)
+  def initialize(registry : EventMachineRegistry, @item : IDraggable, grip : Vector2, @oneshot = false)
     super(registry)
 
     @grip = map(grip)
@@ -213,10 +213,10 @@ class AgentDragHandler < DragHandler
   end
 end
 
-class AgentSummoner < EventAuthority
+class AgentSummoner < EventMachine
   @agent : Agent
 
-  def initialize(registry : EventAuthorityRegistry, @browser : AgentBrowser, agent : Agent.class, pixel : Vector2)
+  def initialize(registry : EventMachineRegistry, @browser : AgentBrowser, agent : Agent.class, pixel : Vector2)
     super(registry)
 
     @agent = @browser.summon(agent, pixel: pixel)
@@ -224,7 +224,7 @@ class AgentSummoner < EventAuthority
     @browser.inspect(@agent)
   end
 
-  def major?
+  def master?
     true
   end
 
@@ -266,8 +266,8 @@ class AgentSummoner < EventAuthority
   end
 end
 
-class AgentDismisser < EventAuthority
-  def initialize(registry : EventAuthorityRegistry, @browser : AgentBrowser)
+class AgentDismisser < EventMachine
+  def initialize(registry : EventMachineRegistry, @browser : AgentBrowser)
     super(registry)
 
     @cursor = SF::Cursor.from_system(SF::Cursor::Type::Cross)
@@ -279,7 +279,7 @@ class AgentDismisser < EventAuthority
     @registry.unregister(self)
   end
 
-  def major?
+  def master?
     true
   end
 
@@ -314,8 +314,8 @@ class AgentDismisser < EventAuthority
   end
 end
 
-class SummonMenuDispatcher < EventAuthority
-  def initialize(registry : EventAuthorityRegistry, @browser : AgentBrowser, pixel : Vector2, @parent : ProtocolAgent? = nil)
+class SummonMenuDispatcher < EventMachine
+  def initialize(registry : EventMachineRegistry, @browser : AgentBrowser, pixel : Vector2, @parent : ProtocolAgent? = nil)
     super(registry)
 
     #
@@ -353,7 +353,7 @@ class SummonMenuDispatcher < EventAuthority
     end
   end
 
-  def major?
+  def master?
     true
   end
 
@@ -420,8 +420,8 @@ class SummonMenuDispatcher < EventAuthority
   end
 end
 
-class AgentBrowserDispatcher < EventAuthority
-  def initialize(registry : EventAuthorityRegistry, @browser : AgentBrowser)
+class AgentBrowserDispatcher < EventMachine
+  def initialize(registry : EventMachineRegistry, @browser : AgentBrowser)
     super(registry)
   end
 
@@ -560,8 +560,8 @@ class AgentBrowserDispatcher < EventAuthority
   end
 end
 
-class EdgeCreator < EventAuthority
-  def initialize(registry : EventAuthorityRegistry, @browser : AgentBrowser)
+class EdgeCreator < EventMachine
+  def initialize(registry : EventMachineRegistry, @browser : AgentBrowser)
     super(registry)
   end
 
@@ -608,10 +608,10 @@ class EdgeCreator < EventAuthority
   end
 end
 
-abstract class EdgeBuilder < EventAuthority
+abstract class EdgeBuilder < EventMachine
   @edge : AgentPointEdge
 
-  def initialize(registry : EventAuthorityRegistry, @browser : AgentBrowser, @agent : Agent)
+  def initialize(registry : EventMachineRegistry, @browser : AgentBrowser, @agent : Agent)
     super(registry)
 
     @edge = @browser.connect(@agent, @agent.mid)
@@ -632,7 +632,7 @@ abstract class EdgeBuilder < EventAuthority
     end
   end
 
-  def major?
+  def master?
     true
   end
 
@@ -717,7 +717,7 @@ class MultiEdgeBuilder < EdgeBuilder
     end
 
     # If the user clicked at an *incompatible* agent or another entity,
-    # don't do anything, and ask the other handlers to skip the event.
+    # don't do anything, and ask the other machines to skip the event.
     raise EndHandlingEvent.new(event) unless other.is_a?(Agent)
     raise EndHandlingEvent.new(event) unless @agent.compatible?(other, in: @browser)
 
@@ -1100,12 +1100,12 @@ class AgentBrowser
     end
   end
 
-  def register(registry : EventAuthorityRegistry)
+  def register(registry : EventMachineRegistry)
     registry.register(AgentBrowserDispatcher.new(registry, self))
     registry.register(EdgeCreator.new(registry, self))
   end
 
-  def unregister(registry : EventAuthorityRegistry)
+  def unregister(registry : EventMachineRegistry)
     registry.clear
   end
 
@@ -1257,7 +1257,7 @@ class AgentBrowserHub
   getter size : Vector2
 
   def initialize(@mouse : MouseManager, @size)
-    @registry = EventAuthorityRegistry.new
+    @registry = EventMachineRegistry.new
     @watch = TimeTable.new
   end
 
@@ -1398,9 +1398,9 @@ end
 # [x] heartbeatagent triggers its rule on tick?
 # [ ] refactor into an isolated, connectable component & document
 #   [ ] split agent browser into... something.. s? it's too big and does
-#       too much. also eventhandler and eventhandlerstore are bad names
+#       too much. also eventhandler and eventmachinestore are bad names
 #       for what they do / what is done with them -- they have much more
-#       agency than simple event handlers
+#       agency than simple event machines
 # [x] merge with the main editor
 # [x] implement play/pause for protocols which is triggered by Protocol#enable/
 #     Protocol#disable/etc.

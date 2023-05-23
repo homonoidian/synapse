@@ -131,6 +131,6 @@ abstract class PhysicalEntity < Entity
   end
 
   # Called when this and *other* entities collide.
-  def smack(other : PhysicalEntity)
+  def acknowledge(other : PhysicalEntity)
   end
 end
