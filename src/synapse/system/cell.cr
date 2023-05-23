@@ -32,7 +32,7 @@ struct Cell
   getter memory : Memory
 
   # Unique identifier of this cell, used in hashing and comparison.
-  @id = UUID.random
+  @id = App.genid
 
   # A set of avatars of this cell.
   #

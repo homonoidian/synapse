@@ -1258,7 +1258,7 @@ class AgentBrowserHub
 
   def initialize(@mouse : MouseManager, @size)
     @registry = EventAuthorityRegistry.new
-    @watch = TimeTable.new(ClockAuthority.new)
+    @watch = TimeTable.new
   end
 
   def close
@@ -1405,9 +1405,7 @@ end
 # [x] implement play/pause for protocols which is triggered by Protocol#enable/
 #     Protocol#disable/etc.
 # [ ] implement play/pause for protoplasm (that is, for Tank)
-# [ ] use play/pause on tank as an implementation of play/pause instead
-#     of the weird ClockAuthority stuff -- implement TimeTable#pause and
-#     TimeTable#unpause.
+# [x] get rid of the weird ClockAuthority stuff
 # [ ] add a GUI way to pause/unpause individual cells
 # [x] add a GUI way to pause/unpause individual rules
 # [x] add a GUI way to pause/unpause individual protocols

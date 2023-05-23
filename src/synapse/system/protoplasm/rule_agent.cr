@@ -110,8 +110,9 @@ class HeartbeatRuleAgent < RuleAgent
 
   def_drain_as HeartbeatRuleEditor, BufferEditorColumnInstant
 
-  # Returns the time when this agent was last paused.
-  getter pausestart = Time.monotonic
+  # Returns the time when this agent was last paused, or nil if this
+  # agent was never paused.
+  getter? pausestart : Time::Span?
 
   # Returns the period of this heartbeat agent. If nil is returned, this
   # agent wants to run every tick. Otherwise, the returned `Time::Span`

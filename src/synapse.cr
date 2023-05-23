@@ -85,7 +85,7 @@ class World < Tank
     @entropy = OpenSimplexNoise.new
     @stime = 1i64
 
-    @watch = TimeTable.new(App.time)
+    @watch = TimeTable.new
 
     # Compute milliseconds between 0..2000 by scaling turbulence.
     @scatterer = @watch.every(((1 - self.class.turbulence) * 2000).milliseconds) do
@@ -98,10 +98,6 @@ class World < Tank
   # coordinates of the sampled point.
   def self.turbulence
     0.4
-  end
-
-  def clock_authority
-    App.time # TODO: make this actually an independent authority -- no App.time!
   end
 
   def inspect(object : Inspectable?)
@@ -916,11 +912,14 @@ class App
   include SF::Drawable
 
   class_getter the = App.new
-  class_getter time = ClockAuthority.new
 
   getter tank : World
   getter console : Console
   getter browser : AgentBrowserHub
+
+  # A per-frame sample of the monotonic clock. Does not change when
+  # the app is not running.
+  getter frametonic = Time.monotonic
 
   property? heightmap = false
 
@@ -954,7 +953,7 @@ class App
     @scene_window.framerate_limit = 60
 
     @tank = World.new
-    @tt = TimeTable.new(App.time)
+    @tt = TimeTable.new
     @browser = AgentBrowserHub.new(@mouse, size: 700.at(400))
 
     @console = Console::INSTANCE
@@ -989,6 +988,31 @@ class App
     @mode = Mode::Normal.new
     @mode.load(self)
   end
+
+  # -------------------------------------------- This is a nice cozy room!
+
+  alias Id = UInt128
+
+  @@ids = 0u128
+
+  def self.genid : Id
+    @@ids, _ = @@ids &+ 1, @@ids
+  end
+
+  @timeouts = [] of ControlledTimeout
+
+  def register(timeout : ControlledTimeout)
+    @timeouts << timeout
+
+    # Switch on or off with the crowd.
+    timeout.switch(state: @time)
+  end
+
+  def unregister(timeout : ControlledTimeout)
+    @timeouts.delete(timeout)
+  end
+
+  # --------------------------------------------
 
   def default_cursor
     SF::Cursor.from_system(SF::Cursor::Type::Arrow)
@@ -1046,21 +1070,18 @@ class App
     return unless @time
 
     @time = false
+    @timeouts.each &.pause
   end
 
   def start_time
     return if @time
 
     @time = true
-
-    App.time.unpause
+    @timeouts.each &.unpause
   end
 
   def toggle_time
-    @time = !@time
-    if @time
-      App.time.unpause
-    end
+    @time ? stop_time : start_time
   end
 
   def draw(target, states)
@@ -1187,6 +1208,8 @@ class App
         end
       end
 
+      @frametonic = Time.monotonic
+
       @tt.tick
 
       @tank.tick(1/60) if @time
@@ -1195,12 +1218,114 @@ class App
 
       @editor_window.clear(SF::Color.new(0x21, 0x21, 0x21))
       @scene_window.clear(SF::Color::White)
-
       @editor_window.draw(self)
 
       @scene_window.display
       @editor_window.display
     end
+  end
+end
+
+# Monotonic clock with pause/unpause support.
+#
+# Time is queried from the per-frame `App#frametonic`, saving us
+# some syscalls.
+class App::FrameClock
+  @starttime : Time::Span
+  @pausestart : Time::Span?
+
+  def initialize
+    @starttime = App.the.frametonic
+  end
+
+  # Pauses or unpauses this clock based on the value of *state*.
+  #
+  # - If *state* is true, the clock is *unpaused*.
+  # - If *state* is false, the clock is *paused*.
+  def switch(state : Bool)
+    state ? unpause : pause
+  end
+
+  # Pauses this clock.
+  def pause
+    @pausestart = App.the.frametonic
+  end
+
+  # Unpauses this clock.
+  def unpause
+    @pausestart.try do |pausestart|
+      # Offset start time by time since pause -- makes it seem
+      # as if no pause happened.
+      @starttime += App.the.frametonic - pausestart
+    end
+
+    @pausestart = nil
+  end
+
+  # Updates the start time of this clock to current frametonic time.
+  def restart
+    @starttime = App.the.frametonic
+  end
+
+  # Returns elapsed time from when this clock was created.
+  def elapsed
+    App.the.frametonic - @starttime
+  end
+end
+
+# A naïve, controlled (pausable), single-thread, single-fiber timeout
+# implementation backed by `App::FrameClock`, and therefore usable only
+# when `App` is running.
+class App::ControlledTimeout
+  # Returns the progress of the timeout toward completion, as a number
+  # in the range [0; 1].
+  getter progress = 0.0
+
+  def initialize(@timeout : Time::Span, &@callback : ->)
+    @clock = FrameClock.new
+    @canceled = false
+  end
+
+  # Publishes this timeout to `App`, making it possible to control it
+  # with Time functionality of the GUI (e.g. pause with spacebar).
+  def publish
+    App.the.register(self)
+  end
+
+  # Inverse of `publish`.
+  def unpublish
+    App.the.unregister(self)
+  end
+
+  # Cancels this timeout if it hadn't been canceled/completed yet,
+  # and `unpublish`es it (does nothing if it wasn't published in
+  # the first place).
+  def cancel
+    @progress = 1.0
+    @canceled = true
+    unpublish
+  end
+
+  # See `App::FrameClock`.
+  delegate :pause, :unpause, :switch, to: @clock
+
+  # Should be called every tick to update progress and invoke the
+  # callback if time is due.
+  #
+  # *delta* is time difference between frames.
+  def tick(delta : Float)
+    if @canceled
+      raise "BUG: attempt to tick() a canceled controlled timeout"
+    end
+
+    elapsed = @clock.elapsed
+    unless elapsed >= @timeout
+      @progress = elapsed.total_milliseconds / @timeout.total_milliseconds
+      return
+    end
+
+    @progress = 1.0
+    @callback.call
   end
 end
 

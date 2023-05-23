@@ -91,9 +91,10 @@ class ProtocolAgent < Agent
       # agent by the length of the pause (agent itself knows when its pause
       # had started).
       #
-      if enabled != agent.enabled? && enabled == false
-        @_starttimes[agent] = {starttime + (time - agent.pausestart), true}
-      end
+      next unless enabled != agent.enabled? && enabled == false
+      next unless pausestart = agent.pausestart?
+
+      @_starttimes[agent] = {starttime + (time - pausestart), true}
     end
 
     #

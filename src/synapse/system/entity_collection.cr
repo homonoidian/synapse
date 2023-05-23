@@ -5,7 +5,7 @@
 # over a specific kind of entity (e.g. `Cell`) without having
 # to iterate over all entities.
 class EntityCollection
-  @entities = {} of Entity.class => Hash(UUID, Entity)
+  @entities = {} of Entity.class => Hash(App::Id, Entity)
 
   # Returns the amount of entities of the given *type* in this collection.
   def count(type : T.class) forall T
@@ -19,7 +19,7 @@ class EntityCollection
 
   # Returns the entity with the given *id*, or nil if there
   # is no such entity.
-  def []?(id : UUID)
+  def []?(id : App::Id)
     @entities.find(&.[id]?)
   end
 
@@ -37,8 +37,8 @@ class EntityCollection
 
   # Inserts *entity* of the given *type* under *id* into
   # this collection.
-  def insert(type : Entity.class, id : UUID, entity : Entity)
-    (@entities[type] ||= {} of UUID => Entity)[id] = entity
+  def insert(type : Entity.class, id : App::Id, entity : Entity)
+    (@entities[type] ||= {} of App::Id => Entity)[id] = entity
   end
 
   # Inserts *entity* into this collection.
@@ -48,7 +48,7 @@ class EntityCollection
 
   # Deletes *entity* of *type* with the given *id*  from
   # this collection.
-  def delete(type : Entity.class, id : UUID, entity : Entity)
+  def delete(type : Entity.class, id : App::Id, entity : Entity)
     @entities[type]?.try &.delete(id)
   end
 

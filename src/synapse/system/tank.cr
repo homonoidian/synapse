@@ -68,10 +68,6 @@ abstract class Tank
   def print(string : String)
   end
 
-  def clock_authority
-    ClockAuthority.new # TODO: make this actually the authority for the rest of stuff
-  end
-
   def inspecting?(object : Inspectable?)
     @lens.aiming_at?(object)
   end
@@ -109,7 +105,7 @@ abstract class Tank
     end
   end
 
-  def find_entity_by_id?(id : UUID)
+  def find_entity_by_id?(id : App::Id)
     @entities[id]?
   end
 

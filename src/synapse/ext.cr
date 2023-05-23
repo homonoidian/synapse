@@ -209,19 +209,6 @@ module Math
   end
 end
 
-# Clock authority issues clocks, and allows to pause/unpause them.
-class ClockAuthority
-  getter timewall
-
-  def initialize
-    @timewall = Time.monotonic
-  end
-
-  def unpause
-    @timewall = Time.monotonic
-  end
-end
-
 # A very primitive scheduler that doesn't spawn fibers.
 class TimeTable
   class Entry
@@ -231,26 +218,17 @@ class TimeTable
     # signifying how close this entry is to being run/completion.
     getter progress = 0.0
 
-    @timewall : Time::Span
-
     def initialize(
-      @authority : ClockAuthority,
       @period : Time::Span,
       @code : ->,
       @repeating : Bool
     )
-      @timewall = @authority.timewall
       @start = Time.monotonic
     end
 
     # Checks if time has come and runs the code. Returns whether
     # the entry is complete. Repeating entries are never complete.
     def run?
-      if @timewall < @authority.timewall # Timewall "in the past"
-        @timewall = @authority.timewall
-        @start = @timewall - (@period * @progress)
-      end
-
       clock_ms = (Time.monotonic - @start).total_milliseconds
       period_ms = @period.total_milliseconds
 
@@ -281,14 +259,11 @@ class TimeTable
 
   @tasks = {} of UUID => Entry
 
-  def initialize(@authority : ClockAuthority)
-  end
-
   # Executes *block* every *period* of time. Returns task identifier
   # so that you can e.g. cancel the task or change its period.
   def every(period : Time::Span, &code : ->) : UUID
     UUID.random.tap do |id|
-      @tasks[id] = Entry.new(@authority, period, code, repeating: true)
+      @tasks[id] = Entry.new(period, code, repeating: true)
     end
   end
 
@@ -296,7 +271,7 @@ class TimeTable
   # so that you can e.g. cancel the task or change its period.
   def after(period : Time::Span, &code : ->) : UUID
     UUID.random.tap do |id|
-      @tasks[id] = Entry.new(@authority, period, code, repeating: false)
+      @tasks[id] = Entry.new(period, code, repeating: false)
     end
   end
 

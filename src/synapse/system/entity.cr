@@ -7,24 +7,21 @@
 # The latter is the only thing that actually differentiates
 # entities under the hood.
 abstract class Entity
-  @decay : UUID?
+  @id : App::Id
+  @decay : App::ControlledTimeout?
 
   def initialize(@tank : Tank, @color : SF::Color, lifespan : Time::Span?)
     # Unique ID of this entity.
     #
     # All entities (including vesicles!) have a unique ID so
     # that the system can address them.
-    @id = UUID.random
-
-    # This entity's personal clock.
-    @watch = TimeTable.new(@tank.clock_authority)
+    @id = App.genid
 
     return unless lifespan
 
-    # Remember the decay task id so that users can query it.
-    #
-    # Dismiss after we're past the desired lifespan.
-    @decay = @watch.after(lifespan) { dismiss }
+    decay = App::ControlledTimeout.new(lifespan, &->dismiss)
+    decay.publish
+    @decay = decay
   end
 
   # Specifies the z-index of this kind of entity, that is, how
@@ -45,7 +42,7 @@ abstract class Entity
   # is to death (e.g. 0 means it's newborn, and 1 means it's
   # about to die).
   def decay
-    @decay.try { |id| @watch.progress(id) } || 0.0
+    @decay.try &.progress || 0.0
   end
 
   # Spawns this entity in the tank.
@@ -61,8 +58,7 @@ abstract class Entity
   #
   # Be careful not to call this method if this entity is not in the tank.
   def dismiss
-    # Important! Unregister timer if we've still not reached it.
-    @decay.try { |id| @watch.cancel(id) }
+    @decay.try &.cancel
     @decay = nil
     @tank.remove(self)
 
@@ -81,7 +77,7 @@ abstract class Entity
 
   # Progresses this entity through time in the tank.
   def tick(delta : Float)
-    @watch.tick
+    @decay.try &.tick(delta)
   end
 
   # Two entities are equal when their IDs are equal.
