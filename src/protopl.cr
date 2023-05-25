@@ -1,37 +1,8 @@
-module IHaloSupport
-  @halos = Set(Halo).new
-
-  abstract def halo(color : SF::Color) : SF::Drawable
-
-  def insert(halo : Halo)
-    @halos << halo
-  end
-
-  def delete(halo : Halo)
-    @halos.delete(halo)
-  end
-
-  def each_halo_with_drawable(&)
-    @halos.each do |halo|
-      next if halo.overlay?
-
-      yield halo, halo.to_drawable
-    end
-  end
-
-  def each_overlay_halo_with_drawable(&)
-    @halos.each do |halo|
-      next unless halo.overlay?
-
-      yield halo, halo.to_drawable
-    end
-  end
-end
-
 module INotificationProvider
   abstract def notify(keyword : Symbol)
 end
 
+require "./synapse/system/protoplasm/halo"
 require "./synapse/system/protoplasm/edge"
 require "./synapse/system/protoplasm/agent"
 require "./synapse/system/protoplasm/protocol_agent"
@@ -81,43 +52,6 @@ class Protoplasm < Tank
 
     @decay_handlers.each &.decayed(entity)
   end
-end
-
-class Halo
-  getter? overlay : Bool
-  property? highlight = false
-
-  def initialize(@recipient : IHaloSupport, @color : SF::Color, *, @overlay = false)
-  end
-
-  def summon
-    @recipient.insert(self)
-  end
-
-  def dismiss
-    @recipient.delete(self)
-  end
-
-  def to_drawable
-    if highlight?
-      _, c, h = LCH.rgb2lch(@color.r, @color.g, @color.b)
-      color = SF::Color.new(*LCH.lch2rgb(70, c, h), @color.a)
-    else
-      color = @color
-    end
-
-    @recipient.halo(color)
-  end
-
-  def encloses?(agent : Agent)
-    @recipient.same?(agent)
-  end
-
-  def includes?(point : Vector2)
-    @recipient.includes?(point)
-  end
-
-  def_equals_and_hash @recipient, @color, @overlay
 end
 
 class EndHandlingEvent < Exception
@@ -727,7 +661,7 @@ class MultiEdgeBuilder < EdgeBuilder
 
     # Dismiss halos with the agent we've just connected to.
     @halos.reject! do |halo|
-      if reject = halo.encloses?(other)
+      if reject = halo.recipient?(other)
         halo.dismiss
       end
 

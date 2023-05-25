@@ -7,7 +7,7 @@ abstract class Agent < CircularEntity
 
   include Inspectable
   include IDraggable
-  include IHaloSupport
+  include IHaloRecipient
   include IRemixIconView
 
   def initialize(tank : Tank)
