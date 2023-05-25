@@ -970,8 +970,6 @@ class App
     @console.folded = true
     @console.move(40, 20)
 
-    @tt.every(10.seconds) { GC.collect }
-
     # FIXME: for some reason both of these create()s leak a
     # huge lot of memory when editor window is resized.
     #
