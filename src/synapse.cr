@@ -669,6 +669,9 @@ class Mode::Ctrl < Mode
   end
 
   def map(app, event : SF::Event::KeyReleased)
+    if event.code.l_shift? || event.code.r_shift?
+      @shift = false
+    end
     return super unless event.code.l_control?
 
     Mode::Normal.new
@@ -679,6 +682,9 @@ class Mode::Ctrl < Mode
     when .j?
       App.the.heightmap = !App.the.heightmap?
     else
+      if event.code.l_shift? || event.code.r_shift?
+        @shift = true
+      end
       return super
     end
 
@@ -696,7 +702,11 @@ class Mode::Ctrl < Mode
     when .right?
       coords = app.coords(event)
       if cell = app.tank.find_cell_at?(coords)
-        copy = cell.replicate(to: coords)
+        if @shift
+          copy = cell.friend(to: coords)
+        else
+          copy = cell.replicate(to: coords)
+        end
         app.tank.inspect(copy)
         return Mode::Normal.new(elevated: copy, ondrop: self)
       end
@@ -1403,7 +1413,7 @@ end
 #     weighted by amount (group attack angles by proximity, at
 #     systoles count weights for each group & compute wcircmean
 #     over circmeans of groups?), evasion conversely
-# [ ] support clone using C-Middrag
+# [x] C-rdrag clones, C-S-rdrag makes an avatar
 # [ ] wormhole wire -- listen at both ends, teleport to the opposite end
 #     represented by two circles "regions" at both ends connected by a 1px line
 # [ ] add "sink" messages which store the last received message

@@ -1,7 +1,7 @@
 module IVesicleDecayHandler # FIXME: ???
-  # Called when *vesicle* decays in the `Protoplasm` this object is
+  # Called when *vesicle* decays in the *protoplasm* this object is
   # listening to.
-  abstract def decayed(vesicle : Vesicle)
+  abstract def decayed(protoplasm : Protoplasm, vesicle : Vesicle)
 end
 
 module INotificationHandler # FIXME: ???
@@ -58,8 +58,16 @@ struct Cell
     @relatives << self
   end
 
-  def decayed(vesicle : Vesicle)
-    # FIXME: mouse | signal("mouse") is explosive, shouldn't be!
+  def decayed(protoplasm : Protoplasm, vesicle : Vesicle)
+    # The more vesicles there are in the protoplasm, the more the
+    # chance of destruction of this vesicle.
+    chance = 0.5*Math::E**(0.05/protoplasm.growth) - 0.5
+    if chance < 0.03 # < 3%
+      chance = 0.01  # = 1%
+    end
+
+    return unless rand < chance
+
     each_avatar &.receive(vesicle)
   end
 

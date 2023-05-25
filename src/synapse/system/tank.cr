@@ -42,6 +42,7 @@ abstract class Tank
   end
 
   def strength_to_vesicle_lifespan(strength : Float)
+    # https://www.desmos.com/calculator/rzukaixbsx
     if strength <= 155
       2000 * Math::E**(-strength/60)
     elsif strength <= 700
@@ -159,16 +160,35 @@ abstract class Tank
     0.0
   end
 
+  # Returns growth rate or population size slope.
+  getter growth = 1.0
+
+  @population = 1
+
+  def tick(delta : Float)
+    super
+
+    @population, prev = @entities.size, @population
+    @growth = @population / prev
+  end
+
+  def growth_modulate(x)
+    1/growth * x
+  end
+
   def distribute(origin : Vector2, message : Message, color : SF::Color, strength : Float, deadzone = CellAvatar.radius * 1.2)
     vamt = strength_to_vesicle_count(strength)
+    vamt = growth_modulate(vamt)
 
-    return unless vamt.in?(1.0..1024.0) # safety belt
+    return unless vamt.in?(1.0..512.0) # safety belt
+
+    lifespan = strength_to_vesicle_lifespan(strength)
+    lifespan = growth_modulate(lifespan)
 
     vrays = Math.max(1, vamt // 2)
-
     vamt = vamt.to_i
     vrays = vrays.to_i
-    vlifespan = strength_to_vesicle_lifespan(strength).milliseconds
+    vlifespan = lifespan.milliseconds + (-50..100).sample.milliseconds
 
     vamt.times do |v|
       angle = Math.radians(((v / vrays) * 360) + rand * 360)

@@ -152,6 +152,13 @@ class CellAvatar < CircularEntity
     replicate_with_select_protocols(to: coords) { true }
   end
 
+  def friend(to coords = mid) : CellAvatar
+    friend = CellAvatar.new(@tank, @cell, @color, @browser)
+    friend.mid = coords
+    friend.summon
+    friend
+  end
+
   def summon
     super
 

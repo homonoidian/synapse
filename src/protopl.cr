@@ -50,7 +50,7 @@ class Protoplasm < Tank
   def remove(entity : Vesicle)
     super
 
-    @decay_handlers.each &.decayed(entity)
+    @decay_handlers.each &.decayed(self, entity)
   end
 end
 
@@ -69,9 +69,9 @@ class EventMachineRegistry
 
   def register(machine : EventMachine)
     if machine.master?
-      # Put master machines in front. Major machines usually throw
-      # the EndHandling exception to signal that event handling
-      # should stop.
+      # Put master machines in front. Master machines usually
+      # throw the EndHandling exception to signal that event
+      # handling should stop.
       @registered.unshift(machine)
     else
       @registered.push(machine)
