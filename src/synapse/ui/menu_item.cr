@@ -21,6 +21,10 @@ class MenuItemView < LabelView
     super + SF.vector2f(icon_span_x, icon_font_size // 4)
   end
 
+  def font
+    FONT_BOLD
+  end
+
   def icon_color
     text_color
   end

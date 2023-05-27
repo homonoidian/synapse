@@ -47,7 +47,7 @@ abstract class Agent < CircularEntity
     tank.notify(keyword)
   end
 
-  @errors = ErrorMessageViewer.new
+  @errors = AgentErrorViewer.new
 
   # Returns whether this agent has failed, that is, whether there
   # are any errors associated with this agent.
@@ -70,7 +70,7 @@ abstract class Agent < CircularEntity
   # Handles failure of this agent with the given *error*: tells the
   # error message viewer to display an error.
   def fail(err : ErrResult)
-    @errors.insert(ErrorMessage.new(err.error.message || "unexpected failure"))
+    @errors.append(err.error.message || "unexpected failure")
 
     halo = Halo.new(self, SF::Color.new(0xE5, 0x73, 0x73, 0x33), overlay: false)
     halo.summon

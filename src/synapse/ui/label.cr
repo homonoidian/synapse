@@ -37,7 +37,7 @@ class LabelView
   end
 
   def font
-    FONT_BOLD
+    FONT
   end
 
   def font_size
