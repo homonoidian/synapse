@@ -10,8 +10,6 @@ class CellAvatar < CircularEntity
   include Jitter
   include Inspectable
 
-  property? sync = true
-
   @wires = Set(Wire).new
 
   def initialize(tank : Tank, @cell : Cell, color : SF::Color, @browser : AgentBrowserHub)
@@ -125,16 +123,6 @@ class CellAvatar < CircularEntity
     @tank.distribute(mid, message, color, strength)
   end
 
-  def interpret(result : ExpressionResult)
-    unless result.is_a?(ErrResult)
-      self.sync = true
-      @cell.unfail
-      return
-    end
-
-    fail(result)
-  end
-
   def replicate_with_select_protocols(to coords = mid, &)
     recipient = AgentGraph.new(Protoplasm.new)
 
@@ -183,21 +171,6 @@ class CellAvatar < CircularEntity
     dismiss
   end
 
-  def fail(err : ErrResult)
-    # On error, if nothing is being inspected, ask tank to
-    # start inspecting myself.
-    #
-    # In any case, add a mark to where the Lua code of the
-    # declaration starts.
-    @tank.inspect(self) if @tank.inspecting?(nil)
-
-    # Signal that what's currently running is out of sync from
-    # what's being shown.
-    self.sync = false
-
-    err.agent.fail(err.error.message || "lua error")
-  end
-
   def handle(event)
     @browser.handle(event)
   end
@@ -240,8 +213,8 @@ class CellAvatar < CircularEntity
     target.draw(halo)
 
     if role.main?
-      sync_color = sync? ? SF::Color.new(0x81, 0xD4, 0xFA, 0x88) : SF::Color.new(0xEF, 0x9A, 0x9A, 0x88)
-      sync_color_opaque = SF::Color.new(sync_color.r, sync_color.g, sync_color.b)
+      sync_color = SF::Color.new(0x81, 0xD4, 0xFA, 0x88)
+      sync_color_opaque = SF::Color.new(0x81, 0xD4, 0xFA)
 
       #
       # Draw little circles at start of line to really show

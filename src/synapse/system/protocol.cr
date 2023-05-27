@@ -70,7 +70,7 @@ end
 
 struct BirthRule < Rule
   def express(agent : BirthRuleAgent, receiver : CellAvatar)
-    receiver.interpret(result(agent, receiver))
+    agent.interpret(result(agent, receiver))
   end
 
   def result(agent : BirthRuleAgent, receiver : CellAvatar) : ExpressionResult
@@ -84,9 +84,9 @@ struct BirthRule < Rule
 
       OkResult.new
     rescue e : Lua::LuaError
-      ErrResult.new(e, agent)
+      ErrResult.new(e)
     rescue e : ArgumentError
-      ErrResult.new(e, agent)
+      ErrResult.new(e)
     ensure
       stack.close
     end
@@ -127,7 +127,7 @@ abstract struct ExpressionResult
 end
 
 record OkResult < ExpressionResult
-record ErrResult < ExpressionResult, error : Lua::LuaError | ArgumentError, agent : RuleAgent
+record ErrResult < ExpressionResult, error : Exception
 
 struct KeywordRule < SignatureRule
   def matches?(vesicle : Vesicle) : Bool
@@ -152,16 +152,16 @@ struct KeywordRule < SignatureRule
       stack.run(@code, @signature.as(KeywordRuleSignature).@keyword)
       OkResult.new
     rescue e : Lua::LuaError
-      ErrResult.new(e, agent)
+      ErrResult.new(e)
     rescue e : ArgumentError
-      ErrResult.new(e, agent)
+      ErrResult.new(e)
     ensure
       stack.close
     end
   end
 
   def express(agent : KeywordRuleAgent, receiver : CellAvatar, vesicle : Vesicle)
-    receiver.interpret(result(agent, receiver, vesicle))
+    agent.interpret(result(agent, receiver, vesicle))
   end
 end
 
@@ -177,14 +177,14 @@ struct HeartbeatRule < SignatureRule
       stack.run(@code, "heartbeat:#{@signature.as(HeartbeatRuleSignature).period? || "tick"}")
       result = OkResult.new
     rescue e : Lua::LuaError
-      result = ErrResult.new(e, agent)
+      result = ErrResult.new(e)
     rescue e : ArgumentError
-      result = ErrResult.new(e, agent)
+      result = ErrResult.new(e)
     ensure
       stack.close
     end
 
-    receiver.interpret(result)
+    agent.interpret(result)
   end
 end
 

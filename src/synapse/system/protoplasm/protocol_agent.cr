@@ -108,9 +108,16 @@ class ProtocolAgent < Agent
     # Express agents whose periods say they want to be expressed.
     #
     @_starttimes.each do |agent, (starttime, enabled)|
-      return unless enabled
+      next unless enabled
 
-      if period = agent.period?
+      begin
+        period = agent.period?
+      rescue e : PeriodParseError
+        agent.fail ErrResult.new(e)
+        next
+      end
+
+      if period
         elapsed = time - starttime
         next if elapsed < period
         @_starttimes[agent] = {time, enabled}

@@ -4,7 +4,7 @@
 # Protoplasms belong to `Cell` objects. They are a little world
 # with controlled physics and distribution rules. Cells are free
 # to change the physics and the rules, perhaps based on messages
-# from the outside world.
+# from the environment.
 class Protoplasm < Tank
   include INotificationProvider
 

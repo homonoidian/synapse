@@ -67,11 +67,10 @@ abstract class Agent < CircularEntity
     @errors.to_next
   end
 
-  # Handles failure of this agent with the given error *message*:
-  # tells the error message viewer to display an error with the
-  # given *message*.
-  def fail(message : String)
-    @errors.insert(ErrorMessage.new(message))
+  # Handles failure of this agent with the given *error*: tells the
+  # error message viewer to display an error.
+  def fail(err : ErrResult)
+    @errors.insert(ErrorMessage.new(err.error.message || "unexpected failure"))
 
     halo = Halo.new(self, SF::Color.new(0xE5, 0x73, 0x73, 0x33), overlay: false)
     halo.summon
@@ -81,6 +80,16 @@ abstract class Agent < CircularEntity
   def unfail
     @errors.clear
     @halos.each &.dismiss
+  end
+
+  # Interprets an expression *result* object.
+  #
+  # It's either an error or an OK. Whatever this agent does in
+  # reaction to either case should be irrelevant to the caller.
+  # What the caller should do is call this method if in possession
+  # of an uninterpreted `ExpressionResult` object.
+  def interpret(result : ExpressionResult)
+    result.is_a?(ErrResult) ? fail(result) : unfail
   end
 
   # Returns whether this agent is enabled.
