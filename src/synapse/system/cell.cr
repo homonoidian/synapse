@@ -153,14 +153,20 @@ struct Cell
     end
   end
 
+  # Returns whether this cell adheres to a protocol with the given *name*.
+  # Obviously enough, only owned protocols with name are checked.
+  def adheres?(name : String)
+    each_owned_protocol_with_name do |_, other|
+      return true if name == other
+    end
+
+    false
+  end
+
   def selective_fill(recipient : AgentGraph, &)
     @graph.fill(recipient) do |protocol|
       yield protocol
     end
-  end
-
-  def unfail
-    @graph.each_agent &.unfail
   end
 
   # Called when an *avatar* of this cell is born.

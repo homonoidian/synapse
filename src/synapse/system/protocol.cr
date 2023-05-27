@@ -211,6 +211,17 @@ class OwnedProtocol
     @name
   end
 
+  # Changes the name of this protocol to *name*.
+  #
+  # Synposis:
+  #
+  # * `OP.rename(name)` where *OP* is the owned protocol.
+  def rename(@name : String)
+    @protocol.rename(@name)
+
+    nil
+  end
+
   # Enables this protocol.
   #
   # Synopsis:

@@ -12,21 +12,21 @@ class ExpressionContext
     @random = Random::PCG32.new(Time.local.to_unix.to_u64!)
   end
 
-  # Computes *heading angle* (in degrees) from a list of angles
-  # (in degrees) with an optional list of weights ([0; 1], sum
-  # must be 1). Essentially circular mean and weighted circular
-  # mean under one function.
+  # Computes an angle (in degrees) from a list of angles (in degrees)
+  # with an optional list of weights ([0; 1], sum must be 1).
+  #
+  # Essentially circular mean and weighted circular mean under one function.
   #
   # Synopsis:
   #
-  # * `heading(...angles : number)`
-  # * `heading(angles : numbers)`
-  # * `heading(angles : numbers, weights : numbers)`
-  def heading(state : LibLua::State)
+  # * `mix(...angles : number)`
+  # * `mix(angles : numbers)`
+  # * `mix(angles : numbers, weights : numbers)`
+  def mix(state : LibLua::State)
     stack = Lua::Stack.new(state, :all)
 
     unless stack.size > 0
-      raise Lua::RuntimeError.new("heading(_): expected angles array and an optional weights array, or a list of angles")
+      raise Lua::RuntimeError.new("mix(_): expected angles array and an optional weights array, or a list of angles")
     end
 
     # Use the angle list variant if the first argument is a number:
@@ -37,7 +37,7 @@ class ExpressionContext
 
       until stack.size == 0
         unless angle = stack.pop.as?(Float64)
-          raise Lua::RuntimeError.new("heading(...angles): expected angle (in degrees), a number")
+          raise Lua::RuntimeError.new("mix(...angles): expected angle (in degrees), a number")
         end
 
         angle = Math.radians(angle)
@@ -470,6 +470,24 @@ class ExpressionContext
     1
   end
 
+  # Returns whether this cell adheres to a protocol with the
+  # specified name.
+  #
+  # Synopsis:
+  #
+  # * `adheresTo(protocol : owned protocol) : boolean`
+  def adheres_to?(state : LibLua::State)
+    stack = Lua::Stack.new(state, :all)
+
+    unless name = stack.pop.as?(String)
+      raise Lua::RuntimeError.new("adheresTo(protocolName): expected a string")
+    end
+
+    stack << @receiver.adheres?(name)
+
+    1
+  end
+
   # Specifies whether the cell is allowed to replicate during
   # this expression.
   def allowed_to_replicate?
@@ -485,7 +503,7 @@ class ExpressionContext
   # Populates *stack* with globals related to this expression context.
   def fill(stack : Lua::Stack)
     stack.set_global("self", @receiver.memory)
-    stack.set_global("heading", ->heading(LibLua::State))
+    stack.set_global("mix", ->mix(LibLua::State))
     stack.set_global("strength", ->strength(LibLua::State))
     stack.set_global("jitter", ->jitter(LibLua::State))
     stack.set_global("entropy", ->entropy(LibLua::State))
@@ -495,6 +513,7 @@ class ExpressionContext
     stack.set_global("swim", ->swim(LibLua::State))
     stack.set_global("print", ->print(LibLua::State))
     stack.set_global("adhere", ->adhere(LibLua::State))
+    stack.set_global("adheresTo", ->adheres_to?(LibLua::State))
     stack.set_global("signal", ->signal(LibLua::State))
 
     # Expose owned protocols to the expressed rule so
