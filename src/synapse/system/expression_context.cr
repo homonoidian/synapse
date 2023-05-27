@@ -488,6 +488,43 @@ class ExpressionContext
     1
   end
 
+  # Returns the owned protocol with the given name if it exists,
+  # otherwise, nil. Useful for dynamic protocol lookup.
+  #
+  # Synopsis:
+  #
+  # * `protocol(name : string) : owned protocol | nil`
+  def protocol(state : LibLua::State)
+    stack = Lua::Stack.new(state, :all)
+
+    unless name = stack.pop.as?(String)
+      raise Lua::RuntimeError.new("protocol(protocolName): expected a string")
+    end
+
+    stack << @receiver.owned_protocol?(name)
+
+    1
+  end
+
+  # Returns the owned protocols that have an edge with the current
+  # rule agent.
+  #
+  # Synopsis:
+  #
+  # * `edges() : {...owned protocol}`
+  def edges(state : LibLua::State)
+    stack = Lua::Stack.new(state, :all)
+    edges = [] of OwnedProtocol
+
+    @receiver.each_owned_protocol_edge(of: @agent) do |protocol|
+      edges << protocol
+    end
+
+    stack << edges
+
+    1
+  end
+
   # Specifies whether the cell is allowed to replicate during
   # this expression.
   def allowed_to_replicate?
@@ -513,6 +550,8 @@ class ExpressionContext
     stack.set_global("swim", ->swim(LibLua::State))
     stack.set_global("print", ->print(LibLua::State))
     stack.set_global("adhere", ->adhere(LibLua::State))
+    stack.set_global("edges", ->edges(LibLua::State))
+    stack.set_global("protocol", ->protocol(LibLua::State))
     stack.set_global("adheresTo", ->adheres_to?(LibLua::State))
     stack.set_global("signal", ->signal(LibLua::State))
 
@@ -551,7 +590,12 @@ end
 #
 # Exposes some information about the message and vesicle itself.
 class VesicleExpressionContext < ExpressionContext
-  def initialize(agent : RuleAgent, receiver : CellAvatar, @vesicle : Vesicle, @attack = 0.0)
+  def initialize(
+    agent : RuleAgent,
+    receiver : CellAvatar,
+    @vesicle : Vesicle,
+    @attack = 0.0
+  )
     super(agent, receiver)
 
     @message = @vesicle.message

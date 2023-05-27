@@ -194,7 +194,7 @@ end
 class OwnedProtocol
   include LuaCallable
 
-  def initialize(@name : String, @protocol : ProtocolAgent)
+  def initialize(@name : String?, @protocol : ProtocolAgent)
   end
 
   # Returns the protocol that is owned.
@@ -217,7 +217,7 @@ class OwnedProtocol
   #
   # * `OP.rename(name)` where *OP* is the owned protocol.
   def rename(@name : String)
-    @protocol.rename(@name)
+    @protocol.rename(name)
 
     nil
   end

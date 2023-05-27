@@ -27,7 +27,10 @@ class CellAvatar < CircularEntity
     )
   end
 
-  delegate :memory, :each_owned_protocol_with_name, :pack, :adheres?, to: @cell
+  delegate :memory, :pack, :adheres?, :owned_protocol?,
+    :each_owned_protocol_with_name,
+    :each_owned_protocol_edge,
+    to: @cell
 
   def adhere(*args, **kwargs)
     @cell.adhere(@browser, *args, **kwargs) do |agent|

@@ -143,6 +143,24 @@ struct Cell
     end
   end
 
+  # Looks up and returns a protocol with the given *name*, owned
+  # by this cell and wrapped in `OwnedProtocol`. If not found,
+  # returns nil.
+  def owned_protocol?(name : String)
+    @graph.each_protocol_agent do |protocol|
+      next unless other = protocol.name?
+      next unless other == name
+      return OwnedProtocol.new(name, protocol)
+    end
+  end
+
+  # Yields owned protocols *agent* has an edge with.
+  def each_owned_protocol_edge(of agent : RuleAgent)
+    @graph.each_protocol_agent(of: agent) do |edge|
+      yield OwnedProtocol.new(edge.name?, edge)
+    end
+  end
+
   # Yields each protocol owned by this cell wrapped in `OwnedProtocol`,
   # followed by its name.
   def each_owned_protocol_with_name(&)
