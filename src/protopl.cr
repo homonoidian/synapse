@@ -1,4 +1,8 @@
+# A loose protocol for objects that can send notifications.
+#
+# See `Protoplasm#add_notification_handler` for the most common use-case.
 module INotificationProvider
+  # Sends a notification with the given *keyword*.
   abstract def notify(keyword : Symbol)
 end
 
@@ -8,51 +12,13 @@ require "./synapse/system/protoplasm/agent"
 require "./synapse/system/protoplasm/protocol_agent"
 require "./synapse/system/protoplasm/rule_agent"
 require "./synapse/system/protoplasm/agent_graph"
+require "./synapse/system/protoplasm/protoplasm"
 
 struct SF::Event::MouseButtonPressed
   property clicks : Int32 = 1
 end
 
 # ---------------------------------------------------------------------
-
-class Protoplasm < Tank
-  include INotificationProvider
-
-  def initialize
-    super
-
-    @space.gravity = CP.v(0, 0)
-    @space.damping = 0.4
-  end
-
-  def each_agent(& : Agent ->)
-    @entities.each(Agent) do |agent|
-      yield agent
-    end
-  end
-
-  @decay_handlers = [] of IVesicleDecayHandler
-
-  def add_vesicle_decay_handler(handler : IVesicleDecayHandler)
-    @decay_handlers << handler
-  end
-
-  @notification_handlers = [] of INotificationHandler
-
-  def add_notification_handler(handler : INotificationHandler)
-    @notification_handlers << handler
-  end
-
-  def notify(keyword : Symbol)
-    @notification_handlers.each &.notify(keyword)
-  end
-
-  def remove(entity : Vesicle)
-    super
-
-    @decay_handlers.each &.decayed(self, entity)
-  end
-end
 
 class EndHandlingEvent < Exception
   # Returns the event whose handling should end.
@@ -1244,7 +1210,12 @@ class AgentBrowserHub
   end
 
   def unregister(cell : Cell)
-    @bmap.delete(cell)
+    if browser = @bmap.delete(cell)
+      @browsers.delete(browser)
+      browser.inspect(nil)
+      browser.unregister(@registry)
+      @browsers.last?.try &.register(@registry)
+    end
   end
 
   @clicks = 0
